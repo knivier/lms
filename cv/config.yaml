@@ -2,7 +2,7 @@
 # To hide Qt/MediaPipe startup warnings in the terminal: CV_QUIET_WARNINGS=1 python -m cv.cv-view
 
 # Pose model: "lite" (fast, less accurate), "full" (balanced), "heavy" (slow, most accurate).
-model_type: heavy
+model_type: full
 
 # Run pose detection every N frames. Higher = faster (fewer runs), more lag.
 # 1 = every frame (smoothest, slowest).
@@ -28,6 +28,13 @@ smoothing_alpha: 0.4
 
 # Degree offset applied to arm (elbow) angles only. real = raw + offset.
 arm_angle_offset: -10
+
+# Elbow angle source/mode:
+#   3d  = world landmarks only
+#   2d  = image-plane only
+#   avg = average of 2d and 3d
+#   max = take the larger (helps full extension read closer to 180)
+elbow_angle_mode: max
 
 # Angle ranges [min, max] in degrees per joint. Limb drawn green when in range, red otherwise.
 # Affects UI and form checks.

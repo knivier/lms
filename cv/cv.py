@@ -71,6 +71,7 @@ _DEFAULT_CONFIG = {
     "save_world_coords": False,
     "smoothing_alpha": 0.4,
     "arm_angle_offset": 0,
+    "elbow_angle_mode": "max",
     "target_angles": {
         "right_elbow": [80, 180],
         "left_elbow": [80, 180],
@@ -136,6 +137,7 @@ SAVE_WORLD_COORDS = _CONFIG["save_world_coords"]
 SMOOTHING_ALPHA = _CONFIG["smoothing_alpha"]
 TARGET_ANGLES = _CONFIG["target_angles"]
 ARM_ANGLE_OFFSET = _CONFIG.get("arm_angle_offset", 0)
+ELBOW_ANGLE_MODE = _CONFIG.get("elbow_angle_mode", "max")
 _POSE_LANDMARKER_CFG = _CONFIG.get("pose_landmarker", _DEFAULT_CONFIG["pose_landmarker"])
 
 # MediaPipe Tasks API aliases
@@ -150,19 +152,21 @@ drawing_utils = mp.tasks.vision.drawing_utils
 
 # ------------------ Helpers ------------------
 def calculate_angle(a, b, c, use_3d=False):
-    """Angle at vertex b (a–b–c) in degrees [0, 180]. Uses dot-product formula in 2D or 3D for consistency."""
+    """Angle at vertex b (a–b–c) in degrees [0, 180], using atan2(norm(cross), dot) for stability."""
     a = np.array(a, dtype=float)
     b = np.array(b, dtype=float)
     c = np.array(c, dtype=float)
-    dim = 3 if (use_3d and len(a) >= 3 and len(b) >= 3 and len(c) >= 3) else 2
-    vec1 = (a - b)[:dim]
-    vec2 = (c - b)[:dim]
-    norm1 = np.linalg.norm(vec1)
-    norm2 = np.linalg.norm(vec2)
-    if norm1 <= 0 or norm2 <= 0:
-        return 0.0
-    cos_angle = np.clip(np.dot(vec1, vec2) / (norm1 * norm2), -1.0, 1.0)
-    return float(np.arccos(cos_angle) * 180.0 / np.pi)
+    if use_3d and len(a) >= 3 and len(b) >= 3 and len(c) >= 3:
+        vec1 = a - b
+        vec2 = c - b
+        cross_norm = np.linalg.norm(np.cross(vec1, vec2))
+        dot = np.dot(vec1, vec2)
+        return float(np.degrees(np.arctan2(cross_norm, dot)))
+    vec1 = (a - b)[:2]
+    vec2 = (c - b)[:2]
+    cross = vec1[0] * vec2[1] - vec1[1] * vec2[0]
+    dot = np.dot(vec1, vec2)
+    return float(np.degrees(np.arctan2(abs(cross), dot)))
 
 
 def landmark_to_xy(landmark, width, height):
@@ -346,31 +350,71 @@ class PoseCore:
                 and ankle_below_knee(lm_norm, side)
             )
 
-        # Elbow angles: use 2D image-plane (normalized) so angle matches camera view; straight arm → 180°, tight bend → correct.
+        def select_elbow_angle(a3d, a2d):
+            if a3d is None and a2d is None:
+                return None
+            mode = str(ELBOW_ANGLE_MODE).lower()
+            if mode == "3d":
+                return a3d if a3d is not None else a2d
+            if mode == "2d":
+                return a2d if a2d is not None else a3d
+            if mode == "avg":
+                vals = [v for v in (a3d, a2d) if v is not None]
+                return sum(vals) / len(vals) if vals else None
+            if mode == "max":
+                vals = [v for v in (a3d, a2d) if v is not None]
+                return max(vals) if vals else None
+            return a3d if a3d is not None else a2d
+
+        # Elbow angles: compute 3D (world) and 2D (image-plane), then select by config.
         angle_r_elbow = angle_l_elbow = angle_r_knee = angle_l_knee = None
+        if (lm_world[PoseLandmark.RIGHT_SHOULDER].visibility > VISIBILITY_THRESHOLD and
+            lm_world[PoseLandmark.RIGHT_ELBOW].visibility > VISIBILITY_THRESHOLD and
+            lm_world[PoseLandmark.RIGHT_WRIST].visibility > VISIBILITY_THRESHOLD):
+            shoulder_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_SHOULDER])
+            elbow_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_ELBOW])
+            wrist_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_WRIST])
+            angle_r_elbow_3d = calculate_angle(shoulder_r, elbow_r, wrist_r, use_3d=True)
+        else:
+            angle_r_elbow_3d = None
         if (
             (lm[PoseLandmark.RIGHT_SHOULDER].visibility or 0) > VISIBILITY_THRESHOLD
             and (lm[PoseLandmark.RIGHT_ELBOW].visibility or 0) > VISIBILITY_THRESHOLD
             and (lm[PoseLandmark.RIGHT_WRIST].visibility or 0) > VISIBILITY_THRESHOLD
         ):
-            shoulder_r = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_SHOULDER])
-            elbow_r = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_ELBOW])
-            wrist_r = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_WRIST])
-            angle_r_elbow = calculate_angle(shoulder_r, elbow_r, wrist_r, use_3d=False)
-            if angle_r_elbow is not None:
-                angle_r_elbow = angle_r_elbow + ARM_ANGLE_OFFSET
+            shoulder_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_SHOULDER])
+            elbow_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_ELBOW])
+            wrist_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_WRIST])
+            angle_r_elbow_2d = calculate_angle(shoulder_r_2d, elbow_r_2d, wrist_r_2d, use_3d=False)
+        else:
+            angle_r_elbow_2d = None
+        angle_r_elbow = select_elbow_angle(angle_r_elbow_3d, angle_r_elbow_2d)
+        if angle_r_elbow is not None:
+            angle_r_elbow = angle_r_elbow + ARM_ANGLE_OFFSET
 
+        if (lm_world[PoseLandmark.LEFT_SHOULDER].visibility > VISIBILITY_THRESHOLD and
+            lm_world[PoseLandmark.LEFT_ELBOW].visibility > VISIBILITY_THRESHOLD and
+            lm_world[PoseLandmark.LEFT_WRIST].visibility > VISIBILITY_THRESHOLD):
+            shoulder_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_SHOULDER])
+            elbow_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_ELBOW])
+            wrist_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_WRIST])
+            angle_l_elbow_3d = calculate_angle(shoulder_l, elbow_l, wrist_l, use_3d=True)
+        else:
+            angle_l_elbow_3d = None
         if (
             (lm[PoseLandmark.LEFT_SHOULDER].visibility or 0) > VISIBILITY_THRESHOLD
             and (lm[PoseLandmark.LEFT_ELBOW].visibility or 0) > VISIBILITY_THRESHOLD
             and (lm[PoseLandmark.LEFT_WRIST].visibility or 0) > VISIBILITY_THRESHOLD
         ):
-            shoulder_l = landmark_to_norm_xy(lm[PoseLandmark.LEFT_SHOULDER])
-            elbow_l = landmark_to_norm_xy(lm[PoseLandmark.LEFT_ELBOW])
-            wrist_l = landmark_to_norm_xy(lm[PoseLandmark.LEFT_WRIST])
-            angle_l_elbow = calculate_angle(shoulder_l, elbow_l, wrist_l, use_3d=False)
-            if angle_l_elbow is not None:
-                angle_l_elbow = angle_l_elbow + ARM_ANGLE_OFFSET
+            shoulder_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_SHOULDER])
+            elbow_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_ELBOW])
+            wrist_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_WRIST])
+            angle_l_elbow_2d = calculate_angle(shoulder_l_2d, elbow_l_2d, wrist_l_2d, use_3d=False)
+        else:
+            angle_l_elbow_2d = None
+        angle_l_elbow = select_elbow_angle(angle_l_elbow_3d, angle_l_elbow_2d)
+        if angle_l_elbow is not None:
+            angle_l_elbow = angle_l_elbow + ARM_ANGLE_OFFSET
 
         if (lm_world[PoseLandmark.RIGHT_HIP].visibility > VISIBILITY_THRESHOLD and
             lm_world[PoseLandmark.RIGHT_KNEE].visibility > VISIBILITY_THRESHOLD and
