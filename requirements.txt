@@ -1,3 +1,4 @@
 mediapipe>=0.10.9
 opencv-python>=4.5
 numpy>=1.19
+matplotlib>=3.5
