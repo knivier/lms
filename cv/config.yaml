@@ -28,6 +28,12 @@ log_batch_size: 30
 # Write JSON to log every N milliseconds (time-based logging). 100 = 10 times per second.
 log_update_interval_ms: 100
 
+# If true, compress log with gzip (reduces size ~5-10x). Use .jsonl.gz extension.
+log_use_gzip: true
+
+# Skip landmarks with visibility below this in logged JSON (reduces size). 0.05 = drop very low confidence.
+log_min_visibility: 0.05
+
 # If true, log timestamps in milliseconds for precise motion analysis.
 log_save_ms: true
 

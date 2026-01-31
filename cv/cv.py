@@ -72,6 +72,8 @@ _DEFAULT_CONFIG = {
     "cv_height": 720,
     "log_batch_size": 30,
     "log_update_interval_ms": 100,
+    "log_use_gzip": True,
+    "log_min_visibility": 0.05,
     "log_save_ms": True,
     "save_world_coords": False,
     "smoothing_alpha": 0.4,
@@ -146,6 +148,8 @@ CV_WIDTH = int(_CONFIG.get("cv_width", 1280))
 CV_HEIGHT = int(_CONFIG.get("cv_height", 720))
 LOG_BATCH_SIZE = _CONFIG["log_batch_size"]
 LOG_UPDATE_INTERVAL_MS = int(_CONFIG.get("log_update_interval_ms", 100))
+LOG_USE_GZIP = bool(_CONFIG.get("log_use_gzip", True))
+LOG_MIN_VISIBILITY = float(_CONFIG.get("log_min_visibility", 0.05))
 LOG_SAVE_MS = _CONFIG["log_save_ms"]
 SAVE_WORLD_COORDS = _CONFIG["save_world_coords"]
 SMOOTHING_ALPHA = _CONFIG["smoothing_alpha"]
@@ -318,8 +322,11 @@ class PoseCore:
         self.save_world_coords = save_world_coords
         self.log_batch_size = log_batch_size
         self.log_update_interval_ms = LOG_UPDATE_INTERVAL_MS
+        self.log_use_gzip = LOG_USE_GZIP
+        self.log_min_visibility = LOG_MIN_VISIBILITY
         self.log_buffer = []
-        self.log_path = Path(log_path) if log_path else Path(__file__).resolve().parent / "pose_log.jsonl"
+        default_log = Path(__file__).resolve().parent / ("pose_log.jsonl.gz" if LOG_USE_GZIP else "pose_log.jsonl")
+        self.log_path = Path(log_path) if log_path else default_log
         self.last_log_time_ms = 0
         self.pose = create_pose_landmarker(model_type=model_type, use_gpu=use_gpu)
         self.cap = cv2.VideoCapture(camera_id)
@@ -346,9 +353,15 @@ class PoseCore:
     def flush_log_buffer(self):
         if not self.log_buffer:
             return
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            for entry in self.log_buffer:
-                f.write(json.dumps(entry) + "\n")
+        if self.log_use_gzip:
+            import gzip
+            with gzip.open(self.log_path, "at", encoding="utf-8") as f:
+                for entry in self.log_buffer:
+                    f.write(json.dumps(entry, separators=(',', ':')) + "\n")
+        else:
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                for entry in self.log_buffer:
+                    f.write(json.dumps(entry, separators=(',', ':')) + "\n")
         self.log_buffer.clear()
 
     def _build_text_lines(self, lm, lm_world, w, h):
@@ -650,35 +663,41 @@ class PoseCore:
         }
 
     def _build_frame_json(self, now_ms, lm, lm_world, angles, w, h):
-        """Build comprehensive JSON for this frame: timestamps, landmarks, angles, exercise_metrics."""
+        """Build comprehensive JSON for this frame: timestamps, landmarks (filtered by visibility), angles, exercise_metrics."""
         timestamp_ms = now_ms - self.session_start_ms
+        min_vis = self.log_min_visibility
+        
+        # Filter world landmarks: skip low-visibility to reduce size
+        world_lms = []
+        for idx, p in enumerate(lm_world):
+            vis = getattr(p, "visibility", 0) or 0
+            if vis >= min_vis:
+                world_lms.append({
+                    "idx": idx,
+                    "x": round(p.x, 6),
+                    "y": round(p.y, 6),
+                    "z": round(p.z, 6),
+                    "visibility": round(vis, 3),
+                })
+        
+        # Filter image landmarks: skip low-visibility (2D mostly for overlay; can reconstruct from 3D)
+        image_lms = []
+        for idx, p in enumerate(lm):
+            vis = getattr(p, "visibility", 0) or 0
+            if vis >= min_vis:
+                image_lms.append({
+                    "idx": idx,
+                    "x": round(p.x * w, 1),
+                    "y": round(p.y * h, 1),
+                    "visibility": round(vis, 3),
+                })
+        
         entry = {
             "timestamp_ms": timestamp_ms,
             "timestamp_utc": now_ms,
             "frame_index": self.frame_count,
-            "pose_world": {
-                "landmarks": [
-                    {
-                        "x": round(p.x, 6),
-                        "y": round(p.y, 6),
-                        "z": round(p.z, 6),
-                        "visibility": round(getattr(p, "visibility", 0) or 0, 3),
-                    }
-                    for p in lm_world
-                ]
-            },
-            "pose_image": {
-                "width": w,
-                "height": h,
-                "landmarks": [
-                    {
-                        "x": round(p.x * w, 1),
-                        "y": round(p.y * h, 1),
-                        "visibility": round(getattr(p, "visibility", 0) or 0, 3),
-                    }
-                    for p in lm
-                ],
-            },
+            "pose_world": {"landmarks": world_lms},
+            "pose_image": {"width": w, "height": h, "landmarks": image_lms},
             "angles": {k: round(v, 1) if v is not None else None for k, v in (angles or {}).items()},
             "exercise_metrics": {
                 "rep_detected": False,
