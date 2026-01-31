@@ -66,7 +66,12 @@ _DEFAULT_CONFIG = {
     "detect_every_n": 2,
     "use_gpu": True,
     "detect_scale": 1.0,
+    "preview_width": 1920,
+    "preview_height": 1080,
+    "cv_width": 1280,
+    "cv_height": 720,
     "log_batch_size": 30,
+    "log_update_interval_ms": 100,
     "log_save_ms": True,
     "save_world_coords": False,
     "smoothing_alpha": 0.4,
@@ -135,7 +140,12 @@ MODEL_TYPE = _CONFIG.get("model_type", "heavy")
 DETECT_EVERY_N = _CONFIG["detect_every_n"]
 USE_GPU = _CONFIG["use_gpu"]
 DETECT_SCALE = _CONFIG["detect_scale"]
+PREVIEW_WIDTH = int(_CONFIG.get("preview_width", 1920))
+PREVIEW_HEIGHT = int(_CONFIG.get("preview_height", 1080))
+CV_WIDTH = int(_CONFIG.get("cv_width", 1280))
+CV_HEIGHT = int(_CONFIG.get("cv_height", 720))
 LOG_BATCH_SIZE = _CONFIG["log_batch_size"]
+LOG_UPDATE_INTERVAL_MS = int(_CONFIG.get("log_update_interval_ms", 100))
 LOG_SAVE_MS = _CONFIG["log_save_ms"]
 SAVE_WORLD_COORDS = _CONFIG["save_world_coords"]
 SMOOTHING_ALPHA = _CONFIG["smoothing_alpha"]
@@ -160,13 +170,21 @@ drawing_utils = mp.tasks.vision.drawing_utils
 
 # ------------------ Helpers ------------------
 def calculate_angle(a, b, c, use_3d=False):
-    """Angle at vertex b (a–b–c) in degrees [0, 180], using atan2(norm(cross), dot) for stability."""
+    """Angle at vertex b (a–b–c) in degrees [0, 180], using atan2(norm(cross), dot).
+    For 3D, project onto the hinge plane (defined by a, b, c) before angle calculation.
+    """
     a = np.array(a, dtype=float)
     b = np.array(b, dtype=float)
     c = np.array(c, dtype=float)
     if use_3d and len(a) >= 3 and len(b) >= 3 and len(c) >= 3:
         vec1 = a - b
         vec2 = c - b
+        n = np.cross(vec1, vec2)
+        n_norm = np.linalg.norm(n)
+        if n_norm > 1e-8:
+            n_hat = n / n_norm
+            vec1 = vec1 - np.dot(vec1, n_hat) * n_hat
+            vec2 = vec2 - np.dot(vec2, n_hat) * n_hat
         cross_norm = np.linalg.norm(np.cross(vec1, vec2))
         dot = np.dot(vec1, vec2)
         return float(np.degrees(np.arctan2(cross_norm, dot)))
@@ -276,11 +294,13 @@ class PoseCore:
     def __init__(
         self,
         camera_id=0,
-        width=1920,
-        height=1200,
+        width=PREVIEW_WIDTH,
+        height=PREVIEW_HEIGHT,
         model_type=MODEL_TYPE,
         detect_every_n=DETECT_EVERY_N,
         detect_scale=DETECT_SCALE,
+        cv_width=CV_WIDTH,
+        cv_height=CV_HEIGHT,
         smoothing_alpha=SMOOTHING_ALPHA,
         log_path=None,
         save_world_coords=SAVE_WORLD_COORDS,
@@ -292,11 +312,15 @@ class PoseCore:
         self.height = height
         self.detect_every_n = detect_every_n
         self.detect_scale = max(0.25, min(1.0, float(detect_scale)))
+        self.cv_width = int(cv_width)
+        self.cv_height = int(cv_height)
         self.smoothing_alpha = smoothing_alpha
         self.save_world_coords = save_world_coords
         self.log_batch_size = log_batch_size
+        self.log_update_interval_ms = LOG_UPDATE_INTERVAL_MS
         self.log_buffer = []
         self.log_path = Path(log_path) if log_path else Path(__file__).resolve().parent / "pose_log.jsonl"
+        self.last_log_time_ms = 0
         self.pose = create_pose_landmarker(model_type=model_type, use_gpu=use_gpu)
         self.cap = cv2.VideoCapture(camera_id)
         if not self.cap.isOpened():
@@ -309,6 +333,8 @@ class PoseCore:
         self.frame_count = 0
         self.last_results = None
         self.last_smoothed_lm = None
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self.session_start_ms = int(datetime.now().timestamp() * 1000)
 
     def close(self):
         if self.cap:
@@ -550,11 +576,18 @@ class PoseCore:
         ret, frame = self.cap.read()
         if not ret:
             return None
+        # Convert to grayscale BEFORE any CV processing (testing color impact)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = self._clahe.apply(gray)
+        frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         h, w, _ = frame.shape
 
         if self.frame_count % self.detect_every_n == 0:
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            if self.detect_scale < 1.0:
+            if self.cv_width > 0 and self.cv_height > 0:
+                if self.cv_width != w or self.cv_height != h:
+                    frame_rgb = cv2.resize(frame_rgb, (self.cv_width, self.cv_height), interpolation=cv2.INTER_LINEAR)
+            elif self.detect_scale < 1.0:
                 dw, dh = int(w * self.detect_scale), int(h * self.detect_scale)
                 if dw > 0 and dh > 0:
                     frame_rgb = cv2.resize(frame_rgb, (dw, dh), interpolation=cv2.INTER_LINEAR)
@@ -574,6 +607,7 @@ class PoseCore:
         lm = lm_world = None
         angles = None
         alert_red = False
+        frame_json = None
 
         if results and results.pose_landmarks and results.pose_world_landmarks:
             lm_raw = results.pose_landmarks[0]
@@ -591,22 +625,18 @@ class PoseCore:
             else:
                 alert_red = False
 
-            # Log batch
-            ts_ms = int(self.frame_count * self.frame_interval_ms)
-            entry = {
-                "timestamp_ms": ts_ms,
-                "frame_index": self.frame_count,
-                "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
-            }
-            if angles:
-                for k, v in angles.items():
-                    entry[k] = round(v, 1) if v is not None else None
-            if self.save_world_coords and lm_world:
-                entry["world_landmarks"] = [[getattr(p, "x"), getattr(p, "y"), getattr(p, "z")] for p in lm_world]
-            if angles and any(v is not None for v in angles.values()):
-                self.log_buffer.append(entry)
-                if len(self.log_buffer) >= self.log_batch_size:
-                    self.flush_log_buffer()
+            # Build comprehensive JSON frame
+            now_ms = int(datetime.now().timestamp() * 1000)
+            frame_json = self._build_frame_json(now_ms, lm, lm_world, angles, w, h)
+            
+            # Time-based logging: write every log_update_interval_ms
+            if now_ms - self.last_log_time_ms >= self.log_update_interval_ms:
+                self.log_buffer.append(frame_json)
+                self.last_log_time_ms = now_ms
+            
+            # Batch write when buffer is full
+            if len(self.log_buffer) >= self.log_batch_size:
+                self.flush_log_buffer()
 
         self.frame_count += 1
         return {
@@ -616,7 +646,47 @@ class PoseCore:
             "landmarks": lm,
             "world_landmarks": lm_world,
             "alert_red": alert_red,
+            "frame_json": frame_json,
         }
+
+    def _build_frame_json(self, now_ms, lm, lm_world, angles, w, h):
+        """Build comprehensive JSON for this frame: timestamps, landmarks, angles, exercise_metrics."""
+        timestamp_ms = now_ms - self.session_start_ms
+        entry = {
+            "timestamp_ms": timestamp_ms,
+            "timestamp_utc": now_ms,
+            "frame_index": self.frame_count,
+            "pose_world": {
+                "landmarks": [
+                    {
+                        "x": round(p.x, 6),
+                        "y": round(p.y, 6),
+                        "z": round(p.z, 6),
+                        "visibility": round(getattr(p, "visibility", 0) or 0, 3),
+                    }
+                    for p in lm_world
+                ]
+            },
+            "pose_image": {
+                "width": w,
+                "height": h,
+                "landmarks": [
+                    {
+                        "x": round(p.x * w, 1),
+                        "y": round(p.y * h, 1),
+                        "visibility": round(getattr(p, "visibility", 0) or 0, 3),
+                    }
+                    for p in lm
+                ],
+            },
+            "angles": {k: round(v, 1) if v is not None else None for k, v in (angles or {}).items()},
+            "exercise_metrics": {
+                "rep_detected": False,
+                "hand_above_head": False,
+                "foot_off_ground": False,
+            },
+        }
+        return entry
 
 
 def flip_landmarks_x(lm):
