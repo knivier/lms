@@ -1,0 +1,32 @@
+{
+  // Run pose detection every N frames. Higher = faster (fewer runs), more lag. 1 = every frame (smoothest, slowest).
+  "detect_every_n": 2,
+  // Use GPU for inference if available. Fallback to CPU on failure. True = faster on supported hardware.
+  "use_gpu": true,
+  // Scale frame before sending to model (1.0 = full res). 0.5 = half res = faster, slightly less accurate.
+  "detect_scale": 1.0,
+  // Number of log entries to buffer before writing to disk. Higher = fewer writes, more memory.
+  "log_batch_size": 30,
+  // If true, log timestamps in milliseconds for precise motion analysis.
+  "log_save_ms": true,
+  // If true, include world_landmarks in log for 3D replay (e.g. graphts --replay). Larger log files.
+  "save_world_coords": false,
+  // Temporal smoothing of landmarks (0 = very smooth, 1 = no smoothing). Lower = less jitter, more lag.
+  "smoothing_alpha": 0.4,
+  // Angle ranges [min, max] in degrees per joint. Limb drawn green when in range, red otherwise. Affects UI and form checks.
+  "target_angles": {
+    "right_elbow": [80, 180],
+    "left_elbow": [80, 180],
+    "right_knee": [80, 180],
+    "left_knee": [80, 180]
+  },
+  // MediaPipe pose landmarker confidence thresholds. Lower = more detections in low visibility, more false positives.
+  "pose_landmarker": {
+    // Minimum confidence to accept a new pose detection. Higher = stricter, fewer false detections.
+    "min_pose_detection_confidence": 0.6,
+    // Minimum presence score per landmark. Higher = only show when clearly visible.
+    "min_pose_presence_confidence": 0.6,
+    // Minimum tracking confidence between frames. Higher = drop pose more often when occluded.
+    "min_tracking_confidence": 0.6
+  }
+}

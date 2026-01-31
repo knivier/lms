@@ -1,0 +1,65 @@
+# CV pipeline config. All systems (cv-view.py, graphts.py) use only this via cv.py.
+# To hide Qt/MediaPipe startup warnings in the terminal: CV_QUIET_WARNINGS=1 python -m cv.cv-view
+
+# Pose model: "lite" (fast, less accurate), "full" (balanced), "heavy" (slow, most accurate).
+model_type: full
+
+# Run pose detection every N frames. Higher = faster (fewer runs), more lag.
+# 1 = every frame (smoothest, slowest).
+detect_every_n: 2
+
+# Use GPU for inference if available. Fallback to CPU on failure. True = faster on supported hardware.
+use_gpu: true
+
+# Scale frame before sending to model (1.0 = full res). 0.5 = half res = faster, slightly less accurate.
+detect_scale: 1.0
+
+# Number of log entries to buffer before writing to disk. Higher = fewer writes, more memory.
+log_batch_size: 30
+
+# If true, log timestamps in milliseconds for precise motion analysis.
+log_save_ms: true
+
+# If true, include world_landmarks in log for 3D replay (e.g. graphts --replay). Larger log files.
+save_world_coords: false
+
+# Temporal smoothing of landmarks (0 = very smooth, 1 = no smoothing). Lower = less jitter, more lag.
+smoothing_alpha: 0.4
+
+# Degree offset applied to arm (elbow) angles only. real = raw + offset.
+arm_angle_offset: -10
+
+# Elbow angle source/mode:
+#   3d        = world landmarks only
+#   2d        = image-plane only
+#   avg       = average of 2d and 3d
+#   max       = take the larger (helps full extension read closer to 180)
+#   auto      = use 3d when arm points toward/away from camera, else 2d
+#   extension = use shoulder↔wrist distance ratio (full extension => 180)
+elbow_angle_mode: max
+
+# Auto mode depth threshold (world z distance in meters). Higher = more 2d, lower = more 3d.
+elbow_auto_depth_m: 0.15
+
+# Elbow alert: when elbow angle is near this (± tolerance), tint camera red.
+elbow_alert_angle: 90
+elbow_alert_tolerance: 10
+elbow_alert_red_alpha: 0.35
+
+# Angle ranges [min, max] in degrees per joint. Limb drawn green when in range, red otherwise.
+# Affects UI and form checks.
+target_angles:
+  right_elbow: [80, 180]
+  left_elbow: [80, 180]
+  right_knee: [80, 180]
+  left_knee: [80, 180]
+
+# MediaPipe pose landmarker confidence thresholds.
+# Lower = more detections in low visibility, more false positives.
+pose_landmarker:
+  # Minimum confidence to accept a new pose detection. Higher = stricter, fewer false detections.
+  min_pose_detection_confidence: 0.6
+  # Minimum presence score per landmark. Higher = only show when clearly visible.
+  min_pose_presence_confidence: 0.6
+  # Minimum tracking confidence between frames. Higher = drop pose more often when occluded.
+  min_tracking_confidence: 0.6
