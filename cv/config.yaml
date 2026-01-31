@@ -8,6 +8,14 @@ model_type: full
 # 1 = every frame (smoothest, slowest).
 detect_every_n: 2
 
+# Preview resolution (camera feed shown to user). 1080p = 1920x1080.
+preview_width: 1920
+preview_height: 1080
+
+# CV processing resolution (frame sent into model). 720p = 1280x720.
+cv_width: 1280
+cv_height: 720
+
 # Use GPU for inference if available. Fallback to CPU on failure. True = faster on supported hardware.
 use_gpu: true
 
@@ -16,6 +24,15 @@ detect_scale: 1.0
 
 # Number of log entries to buffer before writing to disk. Higher = fewer writes, more memory.
 log_batch_size: 30
+
+# Write JSON to log every N milliseconds (time-based logging). 100 = 10 times per second.
+log_update_interval_ms: 100
+
+# If true, compress log with gzip (reduces size ~5-10x). Use .jsonl.gz extension.
+log_use_gzip: true
+
+# Skip landmarks with visibility below this in logged JSON (reduces size). 0.05 = drop very low confidence.
+log_min_visibility: 0.05
 
 # If true, log timestamps in milliseconds for precise motion analysis.
 log_save_ms: true
