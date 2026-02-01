@@ -130,7 +130,7 @@ def rep_summary(rep, workout_type="pushups"):
     times = [p["timestamp"] for p in rep]
 
     # Resample angle series to 50 points (1D); model expects (batch, 50)
-    points_1d = to_fixed_length(angles, target_len=50)
+    points_1d = to_fixed_length(angles[:-1], target_len=50)
     pt_min, pt_max = np.min(points_1d), np.max(points_1d)
     points_norm = (points_1d - pt_min) / (pt_max - pt_min) if pt_max > pt_min else np.zeros_like(points_1d)
     rep_quality = model(torch.tensor(points_norm, dtype=torch.float32).unsqueeze(0)).item()

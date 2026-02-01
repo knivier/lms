@@ -79,7 +79,7 @@ with open(JSONL_FILE, "r") as f:
             summary = rep_summary(rep)
             print("Rep detected:", summary)
             reps.append(rep)
-            rep_indexes.append(len(signal) - len(rep) - 2)  # index of the bottom point
+            rep_indexes.append(len(signal)  + 1)  # index of the bottom point
 
 signal = np.array(signal)
 time = np.array(time)
@@ -118,43 +118,77 @@ model = nn.Sequential(
 
 model.load_state_dict(torch.load(BASE_DIR / "crouch_model.pth"))
 model.eval()
+peaks = signal[np.array(rep_indexes)]
+peaks = np.array(rep_indexes)
+def to_fixed_length(points, target_len=50):
+    points = np.asarray(points, dtype=float)
 
-for i in range(len(peaks)-1):
-    start, end = peaks[i], peaks[i+1]
-    rep_segment = signal[start:end+1]
-    rep_time = time[start:end+1]
+    if len(points) == 0:
+        return np.zeros(target_len)
+
+    x_old = np.linspace(0, 1, len(points))
+    x_new = np.linspace(0, 1, target_len)
+
+    return np.interp(x_new, x_old, points)
+
+
+for i in range(len(peaks) - 1):
+    start, end = peaks[i], peaks[i + 1]
+    rep_segment = signal[start:end + 1]
+    rep_time = time[start:end + 1]
 
     if len(rep_segment) < 5:  # skip very short segments
         continue
-    
-    # spline fit
-    spline = UnivariateSpline(rep_time, rep_segment, k=5, s=0)
-    time_resampled = np.linspace(rep_time[0], rep_time[-1], fixed_length)
-    spline_vals_resampled = spline(time_resampled)
-    spline_vals_norm = (spline_vals_resampled - np.min(spline_vals_resampled)) / \
-                       (np.max(spline_vals_resampled) - np.min(spline_vals_resampled))
+
+    # 🔁 Resample to fixed length using interpolation
+    rep_resampled = to_fixed_length(rep_segment, fixed_length)
+
+    # Normalize to [0, 1]
+    min_val = np.min(rep_resampled)
+    max_val = np.max(rep_resampled)
+    if max_val - min_val == 0:
+        continue  # avoid divide-by-zero reps
+
+    rep_norm = (rep_resampled - min_val) / (max_val - min_val)
+
+    # Plot
     plt.figure(figsize=(8, 4))
     plt.plot(rep_time, rep_segment, label="Original Rep")
-    plt.plot(time_resampled, spline_vals_resampled, '--', label="5th-degree Spline Fit")
+    plt.plot(
+        np.linspace(rep_time[0], rep_time[-1], fixed_length),
+        rep_resampled,
+        '--',
+        label="Interpolated (Fixed Length)"
+    )
     plt.xlabel("Time (s)")
     plt.ylabel("Knee Angle")
-    plt.title("First Rep Spline Fit Using Actual Time")
+    plt.title(f"Rep {i+1} Interpolated to Fixed Length")
     plt.legend()
     plt.show()
-    # Ask user for label
-    print("Predicted Score: " + str(model(torch.tensor(spline_vals_norm, dtype=torch.float32).unsqueeze(0)).item()))
+
+    # Model prediction
+    with torch.no_grad():
+        pred = model(
+            torch.tensor(rep_norm, dtype=torch.float32).unsqueeze(0)
+        ).item()
+
+    print("Predicted Score:", pred)
     print(f"Rep {i+1}/{len(peaks)-1}:")
-    print("Normalized spline vector preview:", spline_vals_norm[:5], "...")  # first 5 values
+    print("Normalized vector preview:", rep_norm[:5], "...")
+
+    # Ask user for label
     label = input("Enter label/output for this rep (e.g., 0 or 1): ")
     try:
         label = float(label)
     except:
         print("Invalid input, defaulting to 0")
-        label = 0
+        label = 0.0
 
     # Append to dataset
-    dataset.append({"input": spline_vals_norm.tolist(), "output": label})
-
+    dataset.append({
+        "input": rep_norm.tolist(),
+        "output": label
+    })
 # ---------------------------
 # Save dataset
 # ---------------------------
