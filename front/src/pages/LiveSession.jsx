@@ -45,6 +45,8 @@ export default function LiveSession() {
   // Native feed (Tauri): cv.py frames from IPC. Fallback: stream URL when running in browser.
   const [cvFrame, setCvFrame] = useState(null);
   const unlistenCvFrameRef = useRef(null);
+  const latestCvFrameRef = useRef(null);
+  const cvFrameRafRef = useRef(null);
 
   const CV_STREAM_URL = "http://127.0.0.1:8765/cv-stream";
   const isTauri = typeof window !== "undefined" && (window.__TAURI_INTERNALS__ != null || window.__TAURI__ != null);
@@ -84,6 +86,14 @@ export default function LiveSession() {
     setStartRef.current = null;
   }, [workoutId]);
 
+  // Persist selected workout to workout_id.json (Tauri only); updates whenever workoutId changes.
+  useEffect(() => {
+    if (typeof window === "undefined" || (window.__TAURI_INTERNALS__ == null && window.__TAURI__ == null)) return;
+    import("@tauri-apps/api/core")
+      .then((m) => m.invoke("write_workout_id", { workoutId: workoutId ?? "" }))
+      .catch(() => {});
+  }, [workoutId]);
+
   // Time since last rest (updates every second when running)
   useEffect(() => {
     if (!isRunning) return;
@@ -98,17 +108,27 @@ export default function LiveSession() {
   }, [isRunning, lastRestAt]);
 
   // Native feed (Tauri): start cv.py pipeline and listen for frames; stop and unlisten on end.
+  // Store latest frame in a ref and paint at rAF rate so we always show the newest frame (reduces lag from backlog).
   useEffect(() => {
     if (!isTauri || !isRunning) return;
     setCvFrame(null);
+    latestCvFrameRef.current = null;
     setCvStreamError(false);
     let unlisten = null;
+    let rafActive = true;
+    const paintLatest = () => {
+      if (!rafActive) return;
+      const latest = latestCvFrameRef.current;
+      if (latest != null) setCvFrame(latest);
+      cvFrameRafRef.current = requestAnimationFrame(paintLatest);
+    };
+    cvFrameRafRef.current = requestAnimationFrame(paintLatest);
     Promise.all([
       import("@tauri-apps/api/core").then((m) => m.invoke("start_cv_feed")),
       import("@tauri-apps/api/event").then((m) =>
         m.listen("cv-frame", (ev) => {
           const b64 = ev.payload;
-          if (typeof b64 === "string") setCvFrame(`data:image/jpeg;base64,${b64}`);
+          if (typeof b64 === "string") latestCvFrameRef.current = `data:image/jpeg;base64,${b64}`;
         })
       ),
     ])
@@ -121,11 +141,14 @@ export default function LiveSession() {
         setError(String(e));
       });
     return () => {
+      rafActive = false;
+      if (cvFrameRafRef.current != null) cancelAnimationFrame(cvFrameRafRef.current);
       import("@tauri-apps/api/core").then((m) => m.invoke("stop_cv_feed")).catch(() => {});
       if (unlistenCvFrameRef.current) {
         unlistenCvFrameRef.current();
         unlistenCvFrameRef.current = null;
       }
+      latestCvFrameRef.current = null;
       setCvFrame(null);
     };
   }, [isTauri, isRunning]);

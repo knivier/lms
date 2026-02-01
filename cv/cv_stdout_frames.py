@@ -7,7 +7,11 @@ Same pipeline as cv-view / cv_stream_server: create_view_core + produce_combined
 import argparse
 import base64
 import sys
+import time
 from pathlib import Path
+
+# Max FPS sent to the app; lowers pipe backlog and perceived lag.
+OUTPUT_FPS = 60
 
 # Ensure cv package is importable (repo root)
 _CV_DIR = Path(__file__).resolve().parent
@@ -37,18 +41,23 @@ def main():
     except RuntimeError as e:
         print(f"CV init failed: {e}", file=sys.stderr)
         sys.exit(1)
+    frame_interval = 1.0 / OUTPUT_FPS
+    next_output_time = time.monotonic()
     try:
         while True:
             combined, cont = produce_combined_frame(core)
             if not cont:
                 break
-            _, jpeg = cv2.imencode(".jpg", combined)
-            b64 = base64.standard_b64encode(jpeg.tobytes()).decode("ascii")
-            try:
-                print(b64, flush=True)
-            except BrokenPipeError:
-                # Reader (e.g. Tauri app) closed the pipe; exit cleanly.
-                break
+            now = time.monotonic()
+            if now >= next_output_time:
+                next_output_time = now + frame_interval
+                _, jpeg = cv2.imencode(".jpg", combined)
+                b64 = base64.standard_b64encode(jpeg.tobytes()).decode("ascii")
+                try:
+                    print(b64, flush=True)
+                except BrokenPipeError:
+                    break
+            # Don't sleep: keep pulling frames so when we do output it's the freshest.
     finally:
         core.close()
 

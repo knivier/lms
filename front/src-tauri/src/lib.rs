@@ -87,6 +87,20 @@ fn stop_cv_feed(state: tauri::State<'_, CvFeedState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Write the selected workout id to workout_id.json (one line: {"workout_id":"squat"}).
+#[tauri::command]
+fn write_workout_id(workout_id: String) -> Result<(), String> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .join("../..")
+        .canonicalize()
+        .map_err(|e| format!("repo root: {}", e))?;
+    let path = repo_root.join("workout_id.json");
+    let line = serde_json::json!({ "workout_id": workout_id }).to_string();
+    std::fs::write(&path, line).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -98,6 +112,7 @@ pub fn run() {
             greet,
             start_cv_feed,
             stop_cv_feed,
+            write_workout_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

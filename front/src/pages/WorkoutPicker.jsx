@@ -147,6 +147,16 @@ function WorkoutCard({ workout, index, onClick }) {
 export default function WorkoutPicker() {
   const navigate = useNavigate();
 
+  async function handleSelectWorkout(workoutId) {
+    if (typeof window !== "undefined" && (window.__TAURI_INTERNALS__ != null || window.__TAURI__ != null)) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("write_workout_id", { workoutId });
+      } catch (_) {}
+    }
+    navigate("/live", { state: { workoutId } });
+  }
+
   return (
     <Box sx={{ maxWidth: 800, mx: "auto" }}>
       <Fade in timeout={300}>
@@ -182,7 +192,7 @@ export default function WorkoutPicker() {
             key={workout.id}
             workout={workout}
             index={index}
-            onClick={() => navigate("/live", { state: { workoutId: workout.id } })}
+            onClick={() => handleSelectWorkout(workout.id)}
           />
         ))}
       </Stack>
