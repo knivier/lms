@@ -326,7 +326,7 @@ export default function LiveSession() {
   return (
     <Box sx={{ maxWidth: 1400, mx: "auto" }}>
       <Fade in timeout={300}>
-        <Box sx={{ mb: 4 }}>
+        <Box sx={{ mb: 2 }}>
           <Typography 
             variant="h4" 
             sx={{ 
@@ -341,9 +341,114 @@ export default function LiveSession() {
             Live Session
           </Typography>
           {workoutConfig && (
-            <Typography variant="body1" sx={{ color: "#6b7280" }}>
+            <Typography variant="body1" sx={{ color: "#6b7280", mb: 2 }}>
               {workoutConfig.title} Training
             </Typography>
+          )}
+          {/* Start/End and set controls at top when a workout is selected */}
+          {workoutId && !showSummary && (
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{ flexWrap: "wrap", gap: 2, alignItems: "center" }}
+            >
+              <Button
+                variant={isRunning ? "outlined" : "contained"}
+                size="large"
+                startIcon={isRunning ? <StopIcon /> : <PlayArrowIcon />}
+                onClick={handleToggle}
+                sx={{
+                  px: 3.5,
+                  py: 1.2,
+                  borderRadius: 2.5,
+                  borderWidth: isRunning ? 2 : 0,
+                  textTransform: "none",
+                  fontWeight: 600,
+                  fontSize: "0.95rem",
+                  minWidth: 160,
+                  boxShadow: !isRunning ? "0 4px 14px rgba(102, 126, 234, 0.4)" : "0 2px 8px rgba(239, 68, 68, 0.2)",
+                  transition: "all 0.2s ease",
+                  "&:hover": {
+                    transform: "translateY(-2px)",
+                    boxShadow: !isRunning
+                      ? "0 6px 20px rgba(102, 126, 234, 0.45)"
+                      : "0 4px 12px rgba(239, 68, 68, 0.3)",
+                  },
+                  ...(!isRunning && {
+                    background: workoutConfig?.gradient || "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                  }),
+                  ...(isRunning && {
+                    borderColor: "#ef4444",
+                    color: "#ef4444",
+                    "&:hover": {
+                      borderColor: "#dc2626",
+                      background: "#fef2f2",
+                    },
+                  }),
+                }}
+              >
+                {isRunning ? "End Workout" : "Start Workout"}
+              </Button>
+              {betweenSets && (
+                <Slide in direction="right" timeout={300}>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    onClick={startNextSet}
+                    sx={{
+                      px: 3.5,
+                      py: 1.2,
+                      borderRadius: 2.5,
+                      textTransform: "none",
+                      fontWeight: 600,
+                      fontSize: "0.95rem",
+                      minWidth: 160,
+                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                      boxShadow: "0 4px 14px rgba(16, 185, 129, 0.4)",
+                      transition: "all 0.2s ease",
+                      "&:hover": {
+                        transform: "translateY(-2px)",
+                        boxShadow: "0 6px 20px rgba(16, 185, 129, 0.5)",
+                      },
+                    }}
+                  >
+                    Start Next Set
+                  </Button>
+                </Slide>
+              )}
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={stopCurrentSet}
+                disabled={!isRunning}
+                sx={{
+                  px: 3.5,
+                  py: 1.2,
+                  borderRadius: 2.5,
+                  borderWidth: 2,
+                  textTransform: "none",
+                  fontWeight: 600,
+                  fontSize: "0.95rem",
+                  minWidth: 160,
+                  borderColor: isRunning ? "rgba(107, 114, 128, 0.5)" : "#e5e7eb",
+                  color: isRunning ? "#374151" : "#9ca3af",
+                  boxShadow: isRunning ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+                  transition: "all 0.2s ease",
+                  "&:hover:not(:disabled)": {
+                    borderColor: "#6b7280",
+                    background: "linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%)",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    transform: "translateY(-1px)",
+                  },
+                  "&:disabled": {
+                    borderColor: "#e5e7eb",
+                    color: "#d1d5db",
+                  },
+                }}
+              >
+                Stop Current Set
+              </Button>
+            </Stack>
           )}
         </Box>
       </Fade>
@@ -605,7 +710,7 @@ export default function LiveSession() {
               }}
             >
               <Typography sx={{ color: "#fbbf24", fontSize: "0.875rem", textAlign: "center" }}>
-                Camera and skeleton use cv.py only. Run: python cv/cv_stream_server.py (camera from cv/config.yaml).
+                Start the workout!
               </Typography>
             </Box>
           )}
@@ -634,7 +739,7 @@ export default function LiveSession() {
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   {error ? error : "Camera + skeleton (cv.py)"}
                 </Typography>
-                <Typography variant="body2">Start workout to see feed from cv.py. Run: python cv/cv_stream_server.py</Typography>
+                <Typography variant="body2">Start workout to see yourself!</Typography>
               </Box>
             </>
           )}
@@ -659,46 +764,48 @@ export default function LiveSession() {
       </Grow>
 
       {/* Metrics Grid */}
-      <Grid container spacing={2} sx={{ mt: 2 }}>
-        <Grid item xs={12} md={6} lg={4}>
+      <Grid container spacing={3} sx={{ mt: 3, justifyContent: "center", maxWidth: 1400, mx: "auto" }}>
+        <Grid item xs={12} sm={4} md={4} lg={4}>
           {/* Current Set Metrics */}
             <Grow in timeout={500}>
               <Paper
                 elevation={0}
                 sx={{
-                  p: 2.5,
-                  borderRadius: 3,
+                  p: 3.5,
+                  borderRadius: 4,
                   background: "#ffffff",
                   border: "1px solid #e5e7eb",
                   position: "relative",
                   overflow: "hidden",
+                  minHeight: 320,
                   height: "100%",
+                  width: "100%",
                   "&::before": {
                     content: '""',
                     position: "absolute",
                     top: 0,
                     left: 0,
                     right: 0,
-                    height: 4,
+                    height: 5,
                     background: workoutConfig?.gradient,
                   },
                 }}
               >
-                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2.5 }}>
                   <Box
                     sx={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 2,
+                      width: 48,
+                      height: 48,
+                      borderRadius: 2.5,
                       background: workoutConfig?.gradient,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                     }}
                   >
-                    <FitnessCenterIcon sx={{ fontSize: 18, color: "#ffffff" }} />
+                    <FitnessCenterIcon sx={{ fontSize: 24, color: "#ffffff" }} />
                   </Box>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
                     {workoutConfig?.title}
                   </Typography>
                 </Stack>
@@ -707,20 +814,20 @@ export default function LiveSession() {
                   <Fade in timeout={300}>
                     <Box
                       sx={{
-                        p: 2,
-                        borderRadius: 2,
+                        p: 3,
+                        borderRadius: 3,
                         background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
-                        mb: 1.5,
+                        mb: 2,
                         textAlign: "center",
                       }}
                     >
-                      <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1, display: "block", fontWeight: 500 }}>
                         Current Set
                       </Typography>
-                      <Typography variant="h2" sx={{ fontWeight: 700, color: "#059669" }}>
+                      <Typography variant="h1" sx={{ fontWeight: 700, color: "#059669", fontSize: "3.5rem" }}>
                         {currentSetReps}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                         reps {isTauri ? "(from CV)" : ""}
                       </Typography>
                     </Box>
@@ -729,24 +836,24 @@ export default function LiveSession() {
 
                 {lastSetMetrics != null && (
                   <Fade in timeout={300}>
-                    <Stack spacing={1} sx={{ mb: 1.5 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: "0.7rem" }}>
+                    <Stack spacing={1.5} sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: "0.75rem", letterSpacing: 0.5 }}>
                         LAST SET
                       </Typography>
                       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.85rem" }}>
+                        <Typography variant="body1" color="text.secondary">
                           Total Reps
                         </Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        <Typography variant="body1" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
                           {lastSetMetrics.reps}
                         </Typography>
                       </Box>
                       {lastSetMetrics.avgSec != null && (
                         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.85rem" }}>
+                          <Typography variant="body1" color="text.secondary">
                             Avg Time
                           </Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          <Typography variant="body1" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
                             {lastSetMetrics.avgSec}s
                           </Typography>
                         </Box>
@@ -755,7 +862,7 @@ export default function LiveSession() {
                   </Fade>
                 )}
 
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block", fontSize: "0.7rem" }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, display: "block", fontSize: "0.85rem" }}>
                   {extraLine}
                 </Typography>
               </Paper>
@@ -763,28 +870,30 @@ export default function LiveSession() {
 
         </Grid>
 
-        <Grid item xs={12} md={6} lg={4}>
+        <Grid item xs={12} sm={4} md={4} lg={4}>
           {/* Rest Timer */}
           <Grow in timeout={600}>
               <Paper
                 elevation={0}
                 sx={{
-                  p: 2.5,
-                  borderRadius: 3,
+                  p: 3.5,
+                  borderRadius: 4,
                   background: betweenSetsMode 
                     ? "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)"
                     : "#ffffff",
                   border: "1px solid #e5e7eb",
                   transition: "all 0.3s ease",
+                  minHeight: 320,
                   height: "100%",
+                  width: "100%",
                 }}
               >
-                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2.5 }}>
                   <Box
                     sx={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 2,
+                      width: 48,
+                      height: 48,
+                      borderRadius: 2.5,
                       background: betweenSetsMode
                         ? "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
                         : "#f3f4f6",
@@ -794,32 +903,32 @@ export default function LiveSession() {
                       transition: "all 0.3s ease",
                     }}
                   >
-                    <TimerIcon sx={{ fontSize: 18, color: betweenSetsMode ? "#ffffff" : "#6b7280" }} />
+                    <TimerIcon sx={{ fontSize: 24, color: betweenSetsMode ? "#ffffff" : "#6b7280" }} />
                   </Box>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
                     {betweenSetsMode ? "Rest Time" : "Active"}
                   </Typography>
                 </Stack>
 
                 <Box
                   sx={{
-                    p: 2,
-                    borderRadius: 2,
+                    p: 3,
+                    borderRadius: 3,
                     background: "#ffffff",
                     textAlign: "center",
-                    mb: 1.5,
+                    mb: 2,
                   }}
                 >
-                  <Typography variant="h2" sx={{ fontWeight: 700, color: betweenSetsMode ? "#d97706" : "#6b7280" }}>
+                  <Typography variant="h1" sx={{ fontWeight: 700, color: betweenSetsMode ? "#d97706" : "#6b7280", fontSize: "3.5rem" }}>
                     {timeSinceRest}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                     seconds
                   </Typography>
                 </Box>
 
                 {avgTimeBetweenRest != null && (
-                  <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block", textAlign: "center", fontSize: "0.7rem" }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, display: "block", textAlign: "center", fontSize: "0.85rem" }}>
                     Avg: {avgTimeBetweenRest.toFixed(1)}s
                   </Typography>
                 )}
@@ -830,15 +939,25 @@ export default function LiveSession() {
                   onClick={handleRest}
                   disabled={!isRunning}
                   sx={{
-                    py: 1.2,
-                    borderRadius: 2,
-                    borderColor: "#e5e7eb",
+                    py: 1.4,
+                    borderRadius: 2.5,
+                    borderWidth: 2,
+                    borderColor: isRunning ? "rgba(245, 158, 11, 0.6)" : "#e5e7eb",
+                    color: isRunning ? "#b45309" : "#6b7280",
                     textTransform: "none",
                     fontWeight: 600,
-                    fontSize: "0.9rem",
-                    "&:hover": {
-                      borderColor: "#9ca3af",
-                      background: "#f9fafb",
+                    fontSize: "0.95rem",
+                    boxShadow: isRunning ? "0 2px 8px rgba(245, 158, 11, 0.2)" : "none",
+                    transition: "all 0.2s ease",
+                    "&:hover:not(:disabled)": {
+                      borderColor: "#d97706",
+                      background: "linear-gradient(135deg, rgba(254, 243, 199, 0.8) 0%, rgba(253, 230, 138, 0.8) 100%)",
+                      boxShadow: "0 4px 12px rgba(245, 158, 11, 0.25)",
+                      transform: "translateY(-1px)",
+                    },
+                    "&:disabled": {
+                      borderColor: "#e5e7eb",
+                      color: "#9ca3af",
                     },
                   }}
                 >
@@ -848,58 +967,61 @@ export default function LiveSession() {
             </Grow>
         </Grid>
 
-        <Grid item xs={12} md={12} lg={4}>
+        <Grid item xs={12} sm={4} md={4} lg={4}>
           {/* Feedback Section */}
           <Grow in timeout={700}>
         <Paper
           elevation={0}
           sx={{
-            p: 2.5,
-            borderRadius: 3,
+            p: 3.5,
+            borderRadius: 4,
             background: "#ffffff",
             border: "1px solid #e5e7eb",
+            minHeight: 320,
             height: "100%",
+            width: "100%",
           }}
         >
-          <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2.5 }}>
             <Box
               sx={{
-                width: 36,
-                height: 36,
-                borderRadius: 2,
+                width: 48,
+                height: 48,
+                borderRadius: 2.5,
                 background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <FeedbackIcon sx={{ fontSize: 18, color: "#ffffff" }} />
+              <FeedbackIcon sx={{ fontSize: 24, color: "#ffffff" }} />
             </Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
               Form Feedback
             </Typography>
           </Stack>
 
           <Box
             sx={{
-              p: 2,
-              borderRadius: 2,
+              p: 2.5,
+              borderRadius: 3,
               background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
               border: "1px solid #86efac",
-              minHeight: 72,
+              minHeight: 100,
             }}
           >
             {betweenSets && formFeedback && (
-              <Typography variant="caption" sx={{ color: "#059669", fontWeight: 600, display: "block", mb: 0.5 }}>
+              <Typography variant="body2" sx={{ color: "#059669", fontWeight: 600, display: "block", mb: 0.5 }}>
                 Last rep feedback
               </Typography>
             )}
             <Typography
-              variant="body2"
+              variant="body1"
               sx={{
                 color: "#065f46",
                 fontWeight: 500,
                 whiteSpace: "pre-line",
+                lineHeight: 1.6,
               }}
             >
               {formFeedback || (isRunning ? (betweenSets ? "Your last rep’s form feedback will appear here after you complete a rep." : "Complete a rep to see form feedback.") : "Start a workout and complete a rep for form feedback.")}
@@ -910,93 +1032,6 @@ export default function LiveSession() {
         </Grid>
       </Grid>
 
-      {/* Action Buttons */}
-      <Fade in timeout={800}>
-        <Stack 
-          direction="row" 
-          spacing={2} 
-          sx={{ 
-            mt: 3, 
-            justifyContent: "center",
-            flexWrap: "wrap",
-            gap: 2,
-          }}
-        >
-          <Button
-            variant={isRunning ? "outlined" : "contained"}
-            size="large"
-            startIcon={isRunning ? <StopIcon /> : <PlayArrowIcon />}
-            onClick={handleToggle}
-            sx={{
-              px: 3.5,
-              py: 1.2,
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-              fontSize: "0.95rem",
-              minWidth: 160,
-              ...(!isRunning && {
-                background: workoutConfig?.gradient || "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              }),
-              ...(isRunning && {
-                borderColor: "#ef4444",
-                color: "#ef4444",
-                "&:hover": {
-                  borderColor: "#dc2626",
-                  background: "#fef2f2",
-                },
-              }),
-            }}
-          >
-            {isRunning ? "End Workout" : "Start Workout"}
-          </Button>
-
-          {betweenSets && (
-            <Slide in direction="right" timeout={300}>
-              <Button 
-                variant="contained" 
-                size="large"
-                onClick={startNextSet}
-                sx={{
-                  px: 3.5,
-                  py: 1.2,
-                  borderRadius: 2,
-                  textTransform: "none",
-                  fontWeight: 600,
-                  fontSize: "0.95rem",
-                  minWidth: 160,
-                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                }}
-              >
-                Start Next Set
-              </Button>
-            </Slide>
-          )}
-
-          <Button
-            variant="outlined"
-            size="large"
-            onClick={stopCurrentSet}
-            disabled={!isRunning}
-            sx={{
-              px: 3.5,
-              py: 1.2,
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-              fontSize: "0.95rem",
-              minWidth: 160,
-              borderColor: "#e5e7eb",
-              "&:hover": {
-                borderColor: "#9ca3af",
-                background: "#f9fafb",
-              },
-            }}
-          >
-            Stop Current Set
-          </Button>
-        </Stack>
-      </Fade>
         </>
       )}
     </Box>

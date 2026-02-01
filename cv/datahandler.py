@@ -14,8 +14,9 @@ TOLERANCE_DEGREES = 8
 TOLERANCE_TIME = 0.8
 WORKOUT_TO_PARAMETERS = {
     "pushups": {"min_threshold": 100, "max_threshold": 150, "joints": ("left_elbow", "right_elbow"), "target_min_angle": 90, "target_max_angle": 160, "target_duration": 1.5},
+    "pushup": {"min_threshold": 100, "max_threshold": 150, "joints": ("left_elbow", "right_elbow"), "target_min_angle": 90, "target_max_angle": 160, "target_duration": 1.5},  # alias
     "squat": {"min_threshold": 90, "max_threshold": 150, "joints": ("left_knee", "right_knee"), "target_min_angle": 70, "target_max_angle": 150, "target_duration": 2.0},
-    "bicep_curl": {"min_threshold": 40, "max_threshold": 150, "joints": ("left_elbow", "right_elbow"), "target_min_angle": 20, "target_max_angle": 160, "target_duration": 1},
+    "bicep_curl": {"min_threshold": 80, "max_threshold": 135, "joints": ("left_elbow", "right_elbow"), "target_min_angle": 40, "target_max_angle": 155, "target_duration": 1.8},
 }
 class SimpleRepDetector:
     WAITING_TOP = 0
@@ -246,7 +247,7 @@ def run_workout(joint_angles, timestamp):
         print(f"[Datahandler] {joint_label} avg={a:.1f}° state={state_name} (min={detector.min_threshold}, max={detector.max_threshold})", file=sys.stderr, flush=True)
     if rep is not None:
         reps.append(rep)
-        summary = rep_summary(rep)
+        summary = rep_summary(rep, workout_type=wid)
         print(f"[Datahandler] Rep detected: {summary}", file=sys.stderr, flush=True)
         # Log rep to disk (JSONL) so live runs persist reps
         try:

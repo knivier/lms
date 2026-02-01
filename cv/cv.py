@@ -1049,9 +1049,9 @@ class PoseCore:
         if not ret:
             return None
         # Convert to grayscale BEFORE any CV processing (testing color impact)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = self._clahe.apply(gray)
-        frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+       # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+       # gray = self._clahe.apply(gray)
+        #frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         h, w, _ = frame.shape
 
         if self.frame_count % self.detect_every_n == 0:

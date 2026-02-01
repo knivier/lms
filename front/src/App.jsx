@@ -1,9 +1,11 @@
+import { useRef, useEffect } from "react";
 import {
   AppBar,
   BottomNavigation,
   BottomNavigationAction,
   Box,
   Fade,
+  Slide,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -21,12 +23,21 @@ const titlesByPath = {
   "/settings": "Settings",
 };
 
+const pathOrder = ["/", "/live", "/settings"];
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const prevPathIndexRef = useRef(pathOrder.indexOf(location.pathname === "/" ? "/" : location.pathname));
 
   const currentPath =
     location.pathname === "/" ? "/" : location.pathname;
+  const pathIndex = pathOrder.indexOf(currentPath);
+  const direction = pathIndex >= prevPathIndexRef.current ? "left" : "right";
+
+  useEffect(() => {
+    prevPathIndexRef.current = pathIndex;
+  }, [pathIndex]);
 
   return (
     <Box
@@ -34,27 +45,38 @@ function App() {
         minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
-        bgcolor: "background.default",
+        background: "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 25%, #fce7f3 50%, #fef3c7 75%, #e0f2fe 100%)",
+        backgroundAttachment: "fixed",
       }}
     >
       <AppBar position="sticky" color="transparent" elevation={0}>
         <Toolbar sx={{ py: 1.5 }}>
           <Typography variant="h6">
-            {titlesByPath[currentPath] ?? "Fitness"}
+            Kinera
           </Typography>
         </Toolbar>
       </AppBar>
 
-      <Box sx={{ flex: 1, px: 4, py: 4 }}>
-        <Fade in key={location.pathname} timeout={300}>
-          <Box>
-            <Routes location={location}>
-              <Route path="/" element={<WorkoutPicker />} />
-              <Route path="/live" element={<LiveSession />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </Box>
-        </Fade>
+      <Box sx={{ flex: 1, px: 4, py: 4, overflow: "hidden" }}>
+        <Slide
+          in
+          key={location.pathname}
+          direction={direction}
+          timeout={{ enter: 280, exit: 220 }}
+          mountOnEnter
+          unmountOnExit
+          sx={{ width: "100%" }}
+        >
+          <Fade in timeout={{ enter: 200, exit: 150 }}>
+            <Box sx={{ width: "100%" }}>
+              <Routes location={location}>
+                <Route path="/" element={<WorkoutPicker />} />
+                <Route path="/live" element={<LiveSession />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </Box>
+          </Fade>
+        </Slide>
       </Box>
 
       <Box sx={{ px: 2, pb: 2 }}>

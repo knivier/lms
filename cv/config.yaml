@@ -62,10 +62,10 @@ elbow_angle_mode: auto
 # Auto mode depth threshold (world z distance in meters). Higher = more 2d, lower = more 3d.
 elbow_auto_depth_m: 0.15
 
-# Elbow alert: when elbow angle is near this (± tolerance), tint camera red.
+# Elbow alert: when elbow angle is near this (± tolerance), tint camera red. Set red_alpha to 0 to disable.
 elbow_alert_angle: 90
 elbow_alert_tolerance: 10
-elbow_alert_red_alpha: 0.35
+elbow_alert_red_alpha: 0
 
 # Angle ranges [min, max] in degrees per joint. Limb drawn green when in range, red otherwise.
 # Affects UI and form checks.
