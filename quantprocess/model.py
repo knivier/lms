@@ -1,17 +1,30 @@
+# Script to train model
 import json
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
 
 # ======= 1. Load JSONL files =======
-files = ["AICrouch.jsonl", "HorridCrouch.jsonl", "NathanCrouching.jsonl"]
+data_dir = Path(__file__).resolve().parent.parent / "ProcessedData"
+files = [
+    "AICrouch.jsonl",
+    "FacingForwardCrouch.jsonl",
+    "HorridCrouch.jsonl",
+    "NathanCrouching.jsonl",
+    "SyntheticData.jsonl",
+]
 
 X_list = []
 y_list = []
 
 for file in files:
-    with open("./lms/ProcessedData/" + file, 'r') as f:
+    path = data_dir / file
+    if not path.exists():
+        continue
+    with open(path, "r") as f:
         for line in f:
             data = json.loads(line)
             X_list.append(data["input"])
@@ -78,4 +91,4 @@ with torch.no_grad():
     print(test_preds[:10].T)
     print("Ground truth:")
     print(y_test[:10].T)
-torch.save(model.state_dict(), "crouch_model.pth")
+torch.save(model.state_dict(), Path(__file__).resolve().parent / "crouch_model.pth")

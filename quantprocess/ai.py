@@ -1,3 +1,4 @@
+# Model testing
 import json
 import numpy as np
 from scipy.signal import find_peaks
@@ -5,9 +6,12 @@ from scipy.interpolate import UnivariateSpline
 from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
+from pathlib import Path
 
-JSONL_FILE = "./lms/training-data/crouch/pose_log.jsonl"
-OUTPUT_FILE = "./dataset.jsonl"  # where we append all reps
+BASE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BASE_DIR.parent
+JSONL_FILE = REPO_ROOT / "training-data" / "crouch" / "pose_log.jsonl"
+OUTPUT_FILE = BASE_DIR / "dataset.jsonl"  # where we append all reps
 
 # ---------------------------
 # Load data
@@ -63,7 +67,7 @@ model = nn.Sequential(
     nn.Linear(50, 1)
 )
 
-model.load_state_dict(torch.load("./lms/crouch_model.pth"))
+model.load_state_dict(torch.load(BASE_DIR / "crouch_model.pth"))
 model.eval()
 
 for i in range(len(peaks)-1):
