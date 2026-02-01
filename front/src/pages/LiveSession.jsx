@@ -57,6 +57,8 @@ export default function LiveSession() {
   const setStartRef = useRef(null);
   // Live metrics from cv/session_live.json (Depth, Knees, etc.) for display
   const [liveMetrics, setLiveMetrics] = useState(null);
+  // Form feedback from last rep (datahandler summary.feedback) for Form Feedback section
+  const [formFeedback, setFormFeedback] = useState("");
 
   // Last completed set metrics (displayed until next "Stop current set")
   const [lastSetMetrics, setLastSetMetrics] = useState(null);
@@ -88,6 +90,7 @@ export default function LiveSession() {
     setShowSummary(false);
     setBetweenSetsMode(false);
     setLiveMetrics(null);
+    setFormFeedback("");
     setStartRef.current = null;
   }, [workoutId]);
 
@@ -174,6 +177,9 @@ export default function LiveSession() {
           setRepCountFromBackend(r.count);
           setRepTimestampsFromBackend(r.rep_timestamps ?? []);
           setRepCountAtSetStart((prev) => (prev === null ? r.count : prev));
+          if (r.last_summary?.feedback != null && String(r.last_summary.feedback).trim() !== "") {
+            setFormFeedback(String(r.last_summary.feedback));
+          }
         })
         .catch(() => {});
     }, 1000);
@@ -880,10 +886,23 @@ export default function LiveSession() {
               borderRadius: 2,
               background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
               border: "1px solid #86efac",
+              minHeight: 72,
             }}
           >
-            <Typography variant="body2" sx={{ color: "#065f46", fontWeight: 500 }}>
-              Good depth. Keep knees aligned.
+            {betweenSets && formFeedback && (
+              <Typography variant="caption" sx={{ color: "#059669", fontWeight: 600, display: "block", mb: 0.5 }}>
+                Last rep feedback
+              </Typography>
+            )}
+            <Typography
+              variant="body2"
+              sx={{
+                color: "#065f46",
+                fontWeight: 500,
+                whiteSpace: "pre-line",
+              }}
+            >
+              {formFeedback || (isRunning ? (betweenSets ? "Your last rep’s form feedback will appear here after you complete a rep." : "Complete a rep to see form feedback.") : "Start a workout and complete a rep for form feedback.")}
             </Typography>
           </Box>
         </Paper>
