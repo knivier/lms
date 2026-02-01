@@ -25,7 +25,7 @@ def run_view(camera_id=0):
         print(exc)
         return
 
-    TEXT_PANEL_WIDTH = 420
+    TEXT_PANEL_WIDTH = 520
     WIN_HEIGHT = core.height
     WIN_WIDTH = core.width + TEXT_PANEL_WIDTH
     cv2.namedWindow("Skeleton Overlay", cv2.WINDOW_NORMAL)
