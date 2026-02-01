@@ -77,6 +77,8 @@ _DEFAULT_CONFIG = {
     "log_save_ms": True,
     "save_world_coords": False,
     "smoothing_alpha": 0.4,
+    "pose_hold_frames": 6,
+    "angle_hold_frames": 6,
     "arm_angle_offset": 0,
     "elbow_angle_mode": "max",
     "elbow_auto_depth_m": 0.15,
@@ -153,6 +155,8 @@ LOG_MIN_VISIBILITY = float(_CONFIG.get("log_min_visibility", 0.05))
 LOG_SAVE_MS = _CONFIG["log_save_ms"]
 SAVE_WORLD_COORDS = _CONFIG["save_world_coords"]
 SMOOTHING_ALPHA = _CONFIG["smoothing_alpha"]
+POSE_HOLD_FRAMES = int(_CONFIG.get("pose_hold_frames", 6))
+ANGLE_HOLD_FRAMES = int(_CONFIG.get("angle_hold_frames", 6))
 TARGET_ANGLES = _CONFIG["target_angles"]
 ARM_ANGLE_OFFSET = _CONFIG.get("arm_angle_offset", 0)
 ELBOW_ANGLE_MODE = _CONFIG.get("elbow_angle_mode", "max")
@@ -201,6 +205,33 @@ def calculate_angle(a, b, c, use_3d=False):
         cross = vec1[0] * vec2[1] - vec1[1] * vec2[0]
         dot = np.dot(vec1, vec2)
         return float(np.degrees(np.arctan2(abs(cross), dot)))
+
+
+def angle_between_vectors(vec1, vec2):
+    """Angle between two vectors in degrees [0, 180]."""
+    v1 = np.array(vec1, dtype=float)
+    v2 = np.array(vec2, dtype=float)
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    if n1 == 0 or n2 == 0:
+        return None
+    cos_theta = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+    return float(np.degrees(np.arccos(cos_theta)))
+
+
+def signed_angle_2d(vec1, vec2):
+    """Signed angle from vec1 to vec2 in degrees [-180, 180]."""
+    v1 = np.array(vec1, dtype=float)
+    v2 = np.array(vec2, dtype=float)
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    if n1 == 0 or n2 == 0:
+        return None
+    v1 = v1 / n1
+    v2 = v2 / n2
+    cross = v1[0] * v2[1] - v1[1] * v2[0]
+    dot = np.dot(v1, v2)
+    return float(np.degrees(np.arctan2(cross, dot)))
 
 
 def landmark_to_xy(landmark, width, height):
@@ -356,9 +387,14 @@ class PoseCore:
         self.frame_interval_ms = 1000 / self.fps
         self.frame_count = 0
         self.last_results = None
+        self._last_good_results = None
+        self._pose_hold_frames = POSE_HOLD_FRAMES
+        self._pose_hold_count = 0
         self.last_smoothed_lm = None
         self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         self.session_start_ms = int(datetime.now().timestamp() * 1000)
+        self._angle_hold_frames = ANGLE_HOLD_FRAMES
+        self._angle_hold = {}
 
     def close(self):
         if self.cap:
@@ -380,6 +416,27 @@ class PoseCore:
                 for entry in self.log_buffer:
                     f.write(json.dumps(entry, separators=(',', ':')) + "\n")
         self.log_buffer.clear()
+
+    def _stabilize_angles(self, angles):
+        """Hold last valid angle values for a few frames to reduce flicker."""
+        stabilized = {}
+        for key, value in angles.items():
+            if value is None:
+                cached = self._angle_hold.get(key)
+                if cached is not None:
+                    cached_val, age = cached
+                    if age < self._angle_hold_frames:
+                        stabilized[key] = cached_val
+                        self._angle_hold[key] = (cached_val, age + 1)
+                    else:
+                        stabilized[key] = None
+                        self._angle_hold.pop(key, None)
+                else:
+                    stabilized[key] = None
+            else:
+                stabilized[key] = value
+                self._angle_hold[key] = (value, 0)
+        return stabilized
 
     def _build_text_lines(self, lm, lm_world, w, h):
         """Build text lines and angle values from landmarks."""
@@ -665,7 +722,8 @@ class PoseCore:
         
         angle_l_hip = angle_l_hip_3d if angle_l_hip_3d is not None else angle_l_hip_2d
 
-        # Ankle angles: knee-ankle-foot (important for calf raises, plantar flexion)
+        # Ankle angles: angle between leg (knee->ankle) and foot (ankle->foot_index)
+        # 0° means foot is straight in line with the leg.
         angle_r_ankle_3d = angle_r_ankle_2d = None
         if (lm_world[PoseLandmark.RIGHT_KNEE].visibility > VISIBILITY_THRESHOLD and
             lm_world[PoseLandmark.RIGHT_ANKLE].visibility > VISIBILITY_THRESHOLD and
@@ -673,7 +731,9 @@ class PoseCore:
             knee_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_KNEE])
             ankle_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_ANKLE])
             foot_r = landmark_to_xyz(lm_world[PoseLandmark.RIGHT_FOOT_INDEX])
-            angle_r_ankle_3d = calculate_angle(knee_r, ankle_r, foot_r, use_3d=True)
+            leg_vec_r = np.array(ankle_r) - np.array(knee_r)
+            foot_vec_r = np.array(foot_r) - np.array(ankle_r)
+            angle_r_ankle_3d = angle_between_vectors(leg_vec_r, foot_vec_r)
         
         if (
             (lm[PoseLandmark.RIGHT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
@@ -683,7 +743,9 @@ class PoseCore:
             knee_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_KNEE])
             ankle_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_ANKLE])
             foot_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_FOOT_INDEX])
-            angle_r_ankle_2d = calculate_angle(knee_r_2d, ankle_r_2d, foot_r_2d, use_3d=False)
+            leg_vec_r_2d = np.array(ankle_r_2d) - np.array(knee_r_2d)
+            foot_vec_r_2d = np.array(foot_r_2d) - np.array(ankle_r_2d)
+            angle_r_ankle_2d = angle_between_vectors(leg_vec_r_2d, foot_vec_r_2d)
         
         angle_r_ankle = angle_r_ankle_3d if angle_r_ankle_3d is not None else angle_r_ankle_2d
 
@@ -694,7 +756,9 @@ class PoseCore:
             knee_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_KNEE])
             ankle_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_ANKLE])
             foot_l = landmark_to_xyz(lm_world[PoseLandmark.LEFT_FOOT_INDEX])
-            angle_l_ankle_3d = calculate_angle(knee_l, ankle_l, foot_l, use_3d=True)
+            leg_vec_l = np.array(ankle_l) - np.array(knee_l)
+            foot_vec_l = np.array(foot_l) - np.array(ankle_l)
+            angle_l_ankle_3d = angle_between_vectors(leg_vec_l, foot_vec_l)
         
         if (
             (lm[PoseLandmark.LEFT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
@@ -704,9 +768,62 @@ class PoseCore:
             knee_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_KNEE])
             ankle_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_ANKLE])
             foot_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_FOOT_INDEX])
-            angle_l_ankle_2d = calculate_angle(knee_l_2d, ankle_l_2d, foot_l_2d, use_3d=False)
+            leg_vec_l_2d = np.array(ankle_l_2d) - np.array(knee_l_2d)
+            foot_vec_l_2d = np.array(foot_l_2d) - np.array(ankle_l_2d)
+            angle_l_ankle_2d = angle_between_vectors(leg_vec_l_2d, foot_vec_l_2d)
         
         angle_l_ankle = angle_l_ankle_3d if angle_l_ankle_3d is not None else angle_l_ankle_2d
+
+        # Ankle roll (inversion/eversion) and yaw (toe-in/out) in 2D image plane
+        roll_r = roll_l = yaw_r = yaw_l = None
+        if (
+            (lm[PoseLandmark.RIGHT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.RIGHT_ANKLE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.RIGHT_FOOT_INDEX].visibility or 0) > VISIBILITY_THRESHOLD
+        ):
+            knee_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_KNEE])
+            ankle_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_ANKLE])
+            foot_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_FOOT_INDEX])
+            leg_vec_r_2d = np.array(ankle_r_2d) - np.array(knee_r_2d)
+            foot_vec_r_2d = np.array(foot_r_2d) - np.array(ankle_r_2d)
+            roll_r = signed_angle_2d(leg_vec_r_2d, foot_vec_r_2d)
+        if (
+            (lm[PoseLandmark.LEFT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.LEFT_ANKLE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.LEFT_FOOT_INDEX].visibility or 0) > VISIBILITY_THRESHOLD
+        ):
+            knee_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_KNEE])
+            ankle_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_ANKLE])
+            foot_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_FOOT_INDEX])
+            leg_vec_l_2d = np.array(ankle_l_2d) - np.array(knee_l_2d)
+            foot_vec_l_2d = np.array(foot_l_2d) - np.array(ankle_l_2d)
+            roll_l = signed_angle_2d(leg_vec_l_2d, foot_vec_l_2d)
+        if (
+            (lm[PoseLandmark.RIGHT_HIP].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.RIGHT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.RIGHT_ANKLE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.RIGHT_FOOT_INDEX].visibility or 0) > VISIBILITY_THRESHOLD
+        ):
+            hip_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_HIP])
+            knee_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_KNEE])
+            ankle_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_ANKLE])
+            foot_r_2d = landmark_to_norm_xy(lm[PoseLandmark.RIGHT_FOOT_INDEX])
+            thigh_vec_r_2d = np.array(knee_r_2d) - np.array(hip_r_2d)
+            foot_vec_r_2d = np.array(foot_r_2d) - np.array(ankle_r_2d)
+            yaw_r = signed_angle_2d(thigh_vec_r_2d, foot_vec_r_2d)
+        if (
+            (lm[PoseLandmark.LEFT_HIP].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.LEFT_KNEE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.LEFT_ANKLE].visibility or 0) > VISIBILITY_THRESHOLD
+            and (lm[PoseLandmark.LEFT_FOOT_INDEX].visibility or 0) > VISIBILITY_THRESHOLD
+        ):
+            hip_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_HIP])
+            knee_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_KNEE])
+            ankle_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_ANKLE])
+            foot_l_2d = landmark_to_norm_xy(lm[PoseLandmark.LEFT_FOOT_INDEX])
+            thigh_vec_l_2d = np.array(knee_l_2d) - np.array(hip_l_2d)
+            foot_vec_l_2d = np.array(foot_l_2d) - np.array(ankle_l_2d)
+            yaw_l = signed_angle_2d(thigh_vec_l_2d, foot_vec_l_2d)
 
         # Torso/spine angle: hip-shoulder-vertical (important for posture, deadlifts, squats)
         # Calculate torso lean using average of left/right shoulders and hips
@@ -798,15 +915,6 @@ class PoseCore:
             color = green_bgr if in_range(angle, joint) else red_bgr
             return (f"{label}: {val_str} ({lo}-{hi}) {status}", color)
 
-        text_lines = [
-            "--- Pose Output ---",
-            "",
-            line_with_status(angle_l_elbow, "left_elbow", "Left hand ", left_hand_str),
-            line_with_status(angle_r_elbow, "right_elbow", "Right hand", right_hand_str),
-            "",
-            line_with_status(angle_l_knee, "left_knee", "Left leg  ", left_leg_str),
-            line_with_status(angle_r_knee, "right_knee", "Right leg ", right_leg_str),
-        ]
         angles = {
             "right_elbow": angle_r_elbow,
             "left_elbow": angle_l_elbow,
@@ -818,8 +926,46 @@ class PoseCore:
             "left_hip": angle_l_hip,
             "right_ankle": angle_r_ankle,
             "left_ankle": angle_l_ankle,
+            "right_ankle_roll": roll_r,
+            "left_ankle_roll": roll_l,
+            "right_ankle_yaw": yaw_r,
+            "left_ankle_yaw": yaw_l,
             "torso": angle_torso,
         }
+        angles = self._stabilize_angles(angles)
+
+        angle_r_elbow = angles.get("right_elbow")
+        angle_l_elbow = angles.get("left_elbow")
+        angle_r_knee = angles.get("right_knee")
+        angle_l_knee = angles.get("left_knee")
+        angle_r_ankle = angles.get("right_ankle")
+        angle_l_ankle = angles.get("left_ankle")
+        roll_r = angles.get("right_ankle_roll")
+        roll_l = angles.get("left_ankle_roll")
+        yaw_r = angles.get("right_ankle_yaw")
+        yaw_l = angles.get("left_ankle_yaw")
+
+        left_hand_str = f"elbow {fmt_angle(angle_l_elbow)}, wrist ({int(wrist_l_px[0])},{int(wrist_l_px[1])})" if left_wrist_ok else f"elbow {fmt_angle(angle_l_elbow)}, wrist (low conf)"
+        right_hand_str = f"elbow {fmt_angle(angle_r_elbow)}, wrist ({int(wrist_r_px[0])},{int(wrist_r_px[1])})" if right_wrist_ok else f"elbow {fmt_angle(angle_r_elbow)}, wrist (low conf)"
+        left_leg_str = f"knee {fmt_angle(angle_l_knee)}, ankle ({int(ankle_l_px[0])},{int(ankle_l_px[1])})" if left_leg_ok else "not in frame"
+        right_leg_str = f"knee {fmt_angle(angle_r_knee)}, ankle ({int(ankle_r_px[0])},{int(ankle_r_px[1])})" if right_leg_ok else "not in frame"
+
+        text_lines = [
+            "--- Pose Output ---",
+            "",
+            line_with_status(angle_l_elbow, "left_elbow", "Left hand ", left_hand_str),
+            line_with_status(angle_r_elbow, "right_elbow", "Right hand", right_hand_str),
+            "",
+            line_with_status(angle_l_knee, "left_knee", "Left leg  ", left_leg_str),
+            line_with_status(angle_r_knee, "right_knee", "Right leg ", right_leg_str),
+            "",
+            f"Left ankle angle : {fmt_angle(angle_l_ankle)}",
+            f"Right ankle angle: {fmt_angle(angle_r_ankle)}",
+            f"Left ankle roll  : {fmt_angle(roll_l)}",
+            f"Right ankle roll : {fmt_angle(roll_r)}",
+            f"Left ankle yaw   : {fmt_angle(yaw_l)}",
+            f"Right ankle yaw  : {fmt_angle(yaw_r)}",
+        ]
         return text_lines, connection_spec, angles
 
     def step(self):
@@ -843,7 +989,18 @@ class PoseCore:
                     frame_rgb = cv2.resize(frame_rgb, (dw, dh), interpolation=cv2.INTER_LINEAR)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
             timestamp_ms = int(self.frame_count * self.frame_interval_ms)
-            self.last_results = self.pose.detect_for_video(mp_image, timestamp_ms)
+            new_results = self.pose.detect_for_video(mp_image, timestamp_ms)
+            has_pose = bool(new_results and new_results.pose_landmarks and new_results.pose_world_landmarks)
+            if has_pose:
+                self.last_results = new_results
+                self._last_good_results = new_results
+                self._pose_hold_count = 0
+            else:
+                if self._last_good_results is not None and self._pose_hold_count < self._pose_hold_frames:
+                    self.last_results = self._last_good_results
+                    self._pose_hold_count += 1
+                else:
+                    self.last_results = new_results
 
         results = self.last_results
         text_lines = [

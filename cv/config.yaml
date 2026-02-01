@@ -6,11 +6,11 @@ model_type: full
 
 # Run pose detection every N frames. Higher = faster (fewer runs), more lag.
 # 1 = every frame (smoothest, slowest).
-detect_every_n: 2
+detect_every_n: 1
 
 # Preview resolution (camera feed shown to user). 1080p = 1920x1080.
 preview_width: 1920
-preview_height: 1080
+preview_height: 1200
 
 # CV processing resolution (frame sent into model). 720p = 1280x720.
 cv_width: 1280
@@ -20,13 +20,13 @@ cv_height: 720
 use_gpu: true
 
 # Scale frame before sending to model (1.0 = full res). 0.5 = half res = faster, slightly less accurate.
-detect_scale: 1.0
+detect_scale: 0.5
 
 # Number of log entries to buffer before writing to disk. Higher = fewer writes, more memory.
-log_batch_size: 30
+log_batch_size: 50
 
 # Write JSON to log every N milliseconds (time-based logging). 100 = 10 times per second.
-log_update_interval_ms: 100
+log_update_interval_ms: 250
 
 # If true, compress log with gzip (reduces size ~5-10x). Use .jsonl.gz extension.
 log_use_gzip: false
@@ -41,7 +41,7 @@ log_save_ms: true
 save_world_coords: false
 
 # Temporal smoothing of landmarks (0 = very smooth, 1 = no smoothing). Lower = less jitter, more lag.
-smoothing_alpha: 0.4
+smoothing_alpha: 0.3
 
 # Degree offset applied to arm (elbow) angles only. real = raw + offset.
 arm_angle_offset: -10
