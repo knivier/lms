@@ -172,6 +172,7 @@ def rep_summary(rep, workout_type="pushups"):
         "num_frames": len(rep),
         "quality_score": rep_quality,
         "feedback": msg.strip(),
+        "input": points_norm.tolist(),
     }
 
 reps = []
