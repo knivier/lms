@@ -174,21 +174,33 @@ drawing_utils = mp.tasks.vision.drawing_utils
 
 # ------------------ Helpers ------------------
 def calculate_angle(a, b, c, use_3d=False):
-    
     """Angle at vertex b (a–b–c) in degrees [0, 180], using atan2(norm(cross), dot).
-    For 3D, project onto the hinge plane (defined by a, b, c) before angle calculation.
+    For 3D, use true 3D vectors; for 2D, project onto image plane (x, y only).
     """
-    a = np.array(a, dtype=float)[:2]
-    b = np.array(b, dtype=float)[:2]
-    c = np.array(c, dtype=float)[:2]
+    a = np.array(a, dtype=float)
+    b = np.array(b, dtype=float)
+    c = np.array(c, dtype=float)
     
-    vec1 = (a - b)[:2]
-    vec2 = (c - b)[:2]
+    if not use_3d:
+        # 2D: only use x, y
+        a = a[:2]
+        b = b[:2]
+        c = c[:2]
     
+    vec1 = a - b
+    vec2 = c - b
     
-    cross = vec1[0] * vec2[1] - vec1[1] * vec2[0]
-    dot = np.dot(vec1, vec2)
-    return float(np.degrees(np.arctan2(abs(cross), dot)))
+    if use_3d:
+        # 3D angle using cross product magnitude and dot product
+        cross = np.cross(vec1, vec2)
+        cross_mag = np.linalg.norm(cross)
+        dot = np.dot(vec1, vec2)
+        return float(np.degrees(np.arctan2(cross_mag, dot)))
+    else:
+        # 2D angle (image plane)
+        cross = vec1[0] * vec2[1] - vec1[1] * vec2[0]
+        dot = np.dot(vec1, vec2)
+        return float(np.degrees(np.arctan2(abs(cross), dot)))
 
 
 def landmark_to_xy(landmark, width, height):
@@ -286,10 +298,13 @@ def create_pose_landmarker(model_type="heavy", use_gpu=USE_GPU):
 
 
 class PoseCore:
-    """Core CV pipeline: capture, detect, smooth, compute angles, and format text lines."""
+    """Core CV pipeline: capture, detect, smooth, compute angles, and format text lines.
+    Supports live camera (camera_id) or recorded video (video_path).
+    """
     def __init__(
         self,
         camera_id=0,
+        video_path=None,
         width=PREVIEW_WIDTH,
         height=PREVIEW_HEIGHT,
         model_type=MODEL_TYPE,
@@ -303,6 +318,8 @@ class PoseCore:
         log_batch_size=LOG_BATCH_SIZE,
         use_gpu=USE_GPU,
     ):
+        self.video_path = video_path
+        self.use_video_time = video_path is not None
         self.camera_id = camera_id
         self.width = width
         self.height = height
@@ -321,12 +338,20 @@ class PoseCore:
         self.log_path = Path(log_path) if log_path else default_log
         self.last_log_time_ms = 0
         self.pose = create_pose_landmarker(model_type=model_type, use_gpu=use_gpu)
-        self.cap = cv2.VideoCapture(camera_id)
-        if not self.cap.isOpened():
-            self.pose.close()
-            raise RuntimeError(f"Could not open camera {camera_id}.")
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        if video_path is not None:
+            self.cap = cv2.VideoCapture(str(video_path))
+            if not self.cap.isOpened():
+                self.pose.close()
+                raise RuntimeError(f"Could not open video: {video_path}")
+            self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or width
+            self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or height
+        else:
+            self.cap = cv2.VideoCapture(camera_id)
+            if not self.cap.isOpened():
+                self.pose.close()
+                raise RuntimeError(f"Could not open camera {camera_id}.")
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
         self.frame_interval_ms = 1000 / self.fps
         self.frame_count = 0
@@ -389,13 +414,17 @@ class PoseCore:
                 and ankle_below_knee(lm_norm, side)
             )
 
-        def select_elbow_angle(a3d, a2d, depth_delta=None, extension_angle=None):
+        def select_elbow_angle(a3d, a2d, depth_delta=None, extension_angle=None, auto_use_3d=None):
             if a3d is None and a2d is None:
                 return None
             mode = str(ELBOW_ANGLE_MODE).lower()
             if mode == "extension":
                 return extension_angle if extension_angle is not None else (a3d if a3d is not None else a2d)
             if mode == "auto":
+                if auto_use_3d is True:
+                    return a3d if a3d is not None else a2d
+                if auto_use_3d is False:
+                    return a2d if a2d is not None else a3d
                 if depth_delta is not None and abs(depth_delta) >= ELBOW_AUTO_DEPTH_M:
                     return a3d if a3d is not None else a2d
                 return a2d if a2d is not None else a3d
@@ -449,10 +478,6 @@ class PoseCore:
             sw_r = np.linalg.norm(np.array(shoulder_r_2d) - np.array(wrist_r_2d))
             max_r = se_r + ew_r if se_r + ew_r > 1e-6 else None
             extension_r = 180.0 * (sw_r / max_r) if max_r else None
-        angle_r_elbow = select_elbow_angle(angle_r_elbow_3d, angle_r_elbow_2d, depth_r, extension_r)
-        if angle_r_elbow is not None:
-            angle_r_elbow = angle_r_elbow + ARM_ANGLE_OFFSET
-
         if (lm_world[PoseLandmark.LEFT_SHOULDER].visibility > VISIBILITY_THRESHOLD and
             lm_world[PoseLandmark.LEFT_ELBOW].visibility > VISIBILITY_THRESHOLD and
             lm_world[PoseLandmark.LEFT_WRIST].visibility > VISIBILITY_THRESHOLD):
@@ -470,6 +495,11 @@ class PoseCore:
             angle_l_elbow_3d = None
             depth_l = None
             extension_l = None
+        auto_use_3d = None
+        if str(ELBOW_ANGLE_MODE).lower() == "auto":
+            depth_candidates = [d for d in (depth_r, depth_l) if d is not None]
+            if depth_candidates:
+                auto_use_3d = max(abs(d) for d in depth_candidates) >= ELBOW_AUTO_DEPTH_M
         if (
             (lm[PoseLandmark.LEFT_SHOULDER].visibility or 0) > VISIBILITY_THRESHOLD
             and (lm[PoseLandmark.LEFT_ELBOW].visibility or 0) > VISIBILITY_THRESHOLD
@@ -487,7 +517,23 @@ class PoseCore:
             sw_l = np.linalg.norm(np.array(shoulder_l_2d) - np.array(wrist_l_2d))
             max_l = se_l + ew_l if se_l + ew_l > 1e-6 else None
             extension_l = 180.0 * (sw_l / max_l) if max_l else None
-        angle_l_elbow = select_elbow_angle(angle_l_elbow_3d, angle_l_elbow_2d, depth_l, extension_l)
+        angle_r_elbow = select_elbow_angle(
+            angle_r_elbow_3d,
+            angle_r_elbow_2d,
+            depth_r,
+            extension_r,
+            auto_use_3d,
+        )
+        if angle_r_elbow is not None:
+            angle_r_elbow = angle_r_elbow + ARM_ANGLE_OFFSET
+
+        angle_l_elbow = select_elbow_angle(
+            angle_l_elbow_3d,
+            angle_l_elbow_2d,
+            depth_l,
+            extension_l,
+            auto_use_3d,
+        )
         if angle_l_elbow is not None:
             angle_l_elbow = angle_l_elbow + ARM_ANGLE_OFFSET
 
@@ -833,10 +879,11 @@ class PoseCore:
             now_ms = int(datetime.now().timestamp() * 1000)
             frame_json = self._build_frame_json(now_ms, lm, lm_world, angles, w, h)
             
-            # Time-based logging: write every log_update_interval_ms
-            if now_ms - self.last_log_time_ms >= self.log_update_interval_ms:
+            # Time-based logging: write every log_update_interval_ms (use video time when reading from file)
+            current_log_time_ms = int(self.frame_count * self.frame_interval_ms) if self.use_video_time else now_ms
+            if current_log_time_ms - self.last_log_time_ms >= self.log_update_interval_ms:
                 self.log_buffer.append(frame_json)
-                self.last_log_time_ms = now_ms
+                self.last_log_time_ms = current_log_time_ms
             
             # Batch write when buffer is full
             if len(self.log_buffer) >= self.log_batch_size:
@@ -855,7 +902,10 @@ class PoseCore:
 
     def _build_frame_json(self, now_ms, lm, lm_world, angles, w, h):
         """Build comprehensive JSON for this frame: timestamps, landmarks (filtered by visibility), angles, exercise_metrics."""
-        timestamp_ms = now_ms - self.session_start_ms
+        if self.use_video_time:
+            timestamp_ms = int(self.frame_count * self.frame_interval_ms)
+        else:
+            timestamp_ms = now_ms - self.session_start_ms
         min_vis = self.log_min_visibility
         
         # Filter world landmarks: skip low-visibility to reduce size
