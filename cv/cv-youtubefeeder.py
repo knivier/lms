@@ -89,7 +89,7 @@ def run_feeder(video_path, log_path=None, mirror=False, realtime=True):
 
 if __name__ == "__main__":
     _script_dir = Path(__file__).resolve().parent
-    _default_video = _script_dir / "crouching.mp4"
+    _default_video = _script_dir / "betterpushups.mp4"
 
     parser = argparse.ArgumentParser(
         description="Replay a recorded video with pose overlay and JSONL logging (uses cv.py core)."
