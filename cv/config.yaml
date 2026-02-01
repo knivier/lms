@@ -25,11 +25,12 @@ use_gpu: true
 # Scale frame before sending to model (1.0 = full res). 0.5 = half res = faster, slightly less accurate.
 detect_scale: 0.5
 
-# Number of log entries to buffer before writing to disk. Higher = fewer writes, more memory.
-log_batch_size: 50
+# Number of log entries to buffer before writing to disk. Lower = more frequent flushes to pose_log.jsonl.
+log_batch_size: 20
 
-# Write JSON to log every N milliseconds (time-based logging). 100 = 10 times per second.
-log_update_interval_ms: 250
+# Write JSON to log every N milliseconds (time-based logging). Lower = more entries per second.
+# 50 = 20 Hz, 33 ≈ 30 Hz.
+log_update_interval_ms: 50
 
 # If true, compress log with gzip (reduces size ~5-10x). Use .jsonl.gz extension.
 log_use_gzip: false
