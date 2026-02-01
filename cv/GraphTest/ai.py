@@ -1,13 +1,15 @@
 import json
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.interpolate import UnivariateSpline
+from matplotlib import pyplot as plt
 
+JSONL_FILE = "./lms/training-data/crouch/horridcrouch.jsonl"
+OUTPUT_FILE = "./dataset.jsonl"  # where we append all reps
 
-JSONL_FILE = "./lms/cv/pose_log.jsonl"
-ANGLE_KEY = "left_knee"
-
+# ---------------------------
+# Load data
+# ---------------------------
 time = []
 signal = []
 
@@ -16,7 +18,6 @@ with open(JSONL_FILE, "r") as f:
         line = line.strip()
         if not line:
             continue
-        # truncate trailing junk if any
         line = line[:line.rfind("}") + 1]
         try:
             obj = json.loads(line)
@@ -24,80 +25,76 @@ with open(JSONL_FILE, "r") as f:
             continue
 
         left_knee = obj.get("angles", {}).get("left_knee")
-        if left_knee is None:
-            continue  # skip nulls
         right_knee = obj.get("angles", {}).get("right_knee")
-        if right_knee is None:
-            continue  # skip nulls
+        if left_knee is None or right_knee is None:
+            continue
+
         value = (left_knee + right_knee) / 2.0
         signal.append(value)
+        time.append(obj.get("timestamp_utc", len(time)))
 
-signal = np.array(signal[0:150])
+signal = np.array(signal)
+time = np.array(time)
+time = (time - time[0]) / 1000.0  # convert to seconds
 
-
-inverted = -np.array(signal)
-
-# detect peaks (dips)
-peaks, _ = find_peaks(inverted, distance=10)  # distance can be adjusted
-peaks = peaks[signal[peaks] < 140]
-print("Number of reps:", len(peaks))
-
-
-plt.figure(figsize=(10,4))
-plt.plot(signal, label='Both Knees')
-plt.plot(peaks, signal[peaks], 'rx', label='Dips/Reps < 140')
-plt.legend()
+# ---------------------------
+# Detect all reps
+# ---------------------------
+inverted = -signal
+peaks, _ = find_peaks(inverted, distance=7)
+peaks = peaks[signal[peaks] < 130]
+plt.plot(time, signal)
+plt.plot(time[peaks], signal[peaks], "x")
 plt.show()
-
-# ============================
-# FFT between first and last peak
-# # ============================
-# if len(peaks) >= 2:
-#     start = peaks[0]
-#     end = peaks[-1]
-#     segment = signal[start:end+1]
-
-#     # Compute FFT
-#     N = len(segment)
-#     fft_vals = np.fft.fft(segment)
-#     fft_freq = np.fft.fftfreq(N, d=1)  # d=1 assumes 1 sample per unit time; adjust if you know FPS
-
-#     # Only take positive frequencies
-#     pos_mask = fft_freq > 0
-#     fft_freq = fft_freq[pos_mask]
-#     fft_vals = np.abs(fft_vals[pos_mask])
-
-#     # Plot FFT
-#     plt.figure(figsize=(10,4))
-#     plt.plot(fft_freq, fft_vals)
-#     plt.title("FFT of segment between first and last peak")
-#     plt.xlabel("Frequency (Hz)")
-#     plt.ylabel("Magnitude")
-#     plt.show()
-# else:
-#     print("Not enough peaks detected for FFT.")
-
 if len(peaks) < 2:
     raise ValueError("Not enough peaks detected.")
 
-# Segment between first two peaks
-start, end = peaks[0], peaks[1]
-segment = signal[start:end+1]
-x = np.arange(len(segment))
+# ---------------------------
+# Extract each rep
+# ---------------------------
+fixed_length = 50
+dataset = []
 
-# Fit 6th-degree spline
-spline = UnivariateSpline(x, segment, k=5, s=0)  # s=0 forces exact fit
-spline_vals = spline(x)
+for i in range(len(peaks)-1):
+    start, end = peaks[i], peaks[i+1]
+    rep_segment = signal[start:end+1]
+    rep_time = time[start:end+1]
 
-print()
-# Plot
-plt.figure(figsize=(8,4))
-plt.plot(x, segment, label="Original Rep")
-plt.plot(x, spline_vals, '--', label="6th-degree Spline Fit")
-plt.xlabel("Frame")
-plt.ylabel("Knee Angle")
-plt.title("Spline Fit of First Rep")
-plt.legend()
-plt.show()
+    if len(rep_segment) < 5:  # skip very short segments
+        continue
     
-    
+    # spline fit
+    spline = UnivariateSpline(rep_time, rep_segment, k=5, s=0)
+    time_resampled = np.linspace(rep_time[0], rep_time[-1], fixed_length)
+    spline_vals_resampled = spline(time_resampled)
+    spline_vals_norm = (spline_vals_resampled - np.min(spline_vals_resampled)) / \
+                       (np.max(spline_vals_resampled) - np.min(spline_vals_resampled))
+    plt.figure(figsize=(8, 4))
+    plt.plot(rep_time, rep_segment, label="Original Rep")
+    plt.plot(time_resampled, spline_vals_resampled, '--', label="5th-degree Spline Fit")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Knee Angle")
+    plt.title("First Rep Spline Fit Using Actual Time")
+    plt.legend()
+    plt.show()
+    # Ask user for label
+    print(f"Rep {i+1}/{len(peaks)-1}:")
+    print("Normalized spline vector preview:", spline_vals_norm[:5], "...")  # first 5 values
+    label = input("Enter label/output for this rep (e.g., 0 or 1): ")
+    try:
+        label = float(label)
+    except:
+        print("Invalid input, defaulting to 0")
+        label = 0
+
+    # Append to dataset
+    dataset.append({"input": spline_vals_norm.tolist(), "output": label})
+
+# ---------------------------
+# Save dataset
+# ---------------------------
+with open(OUTPUT_FILE, "a") as f:  # append mode
+    for entry in dataset:
+        f.write(json.dumps(entry) + "\n")
+
+print(f"Saved {len(dataset)} reps to {OUTPUT_FILE}")
