@@ -1,4 +1,4 @@
-const ANGLE_KEYS = ["left_elbow", "right_elbow"];
+const ANGLE_KEYS = ["left_knee", "right_knee", "left_hip", "right_hip", "torso"];
 
 fetch("../pose_log.jsonl")
   .then(res => res.text())
@@ -23,7 +23,13 @@ fetch("../pose_log.jsonl")
 function plot(time, byKey) {
   const ctx = document.getElementById("angleChart").getContext("2d");
 
-  const colors = { left_elbow: "rgb(78, 121, 167)", right_elbow: "rgb(242, 142, 43)" };
+  const colors = {
+    left_knee: "rgb(78, 121, 167)",
+    right_knee: "rgb(242, 142, 43)",
+    left_hip: "rgb(225, 87, 89)",
+    right_hip: "rgb(118, 183, 178)",
+    torso: "rgb(89, 161, 79)"
+  };
 
   new Chart(ctx, {
     type: "line",
