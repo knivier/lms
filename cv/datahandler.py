@@ -5,11 +5,14 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.interpolate import UnivariateSpline
 import time
+import torch
+import torch.nn as nn
 
 # Rep detection parameters per workout (joints and angle thresholds).
 # Pushups: elbow at top (extended) ~150-180°, at bottom (bent) ~70-100°. We need top >= max, then bottom <= min, then top >= max again.
+TOLERANCE_DEGREES = 8
 WORKOUT_TO_PARAMETERS = {
-    "pushups": {"min_threshold": 95, "max_threshold": 150, "joints": ("left_elbow", "right_elbow")},
+    "pushups": {"min_threshold": 100, "max_threshold": 150, "joints": ("left_elbow", "right_elbow"), "target_min_angle": 90},
     "squat": {"min_threshold": 80, "max_threshold": 170, "joints": ("left_knee", "right_knee")},
     "bicep_curl": {"min_threshold": 30, "max_threshold": 150, "joints": ("left_elbow", "right_elbow")},
 }
@@ -31,8 +34,12 @@ class SimpleRepDetector:
     def _get_angle(self, joint_angles):
         a = joint_angles.get(self.joints[0])
         b = joint_angles.get(self.joints[1])
-        if a is None or b is None:
+        if a is None and b is None:
             return None
+        if a is None:
+            return b
+        if b is None:
+            return a
         return (a + b) / 2.0
 
     def feed(self, joint_angles, timestamp):
@@ -79,6 +86,7 @@ class SimpleRepDetector:
                 self.state = self.DESCENDING  # allow next rep immediately
                 self.prev_angle = angle
                 _log_transition("REP_COMPLETE", angle)
+                
                 return rep  # full rep collected
 
         self.prev_angle = angle
@@ -90,10 +98,35 @@ def _log_transition(state_name, angle):
     """Log state transition to stderr so we can see why reps might not complete."""
     print(f"[Datahandler] state -> {state_name} (angle={angle:.1f}°)", file=sys.stderr, flush=True)
 
+def to_fixed_length_nd(points, target_len=50):
+    points = np.asarray(points, dtype=float)
+    n_dims = points.shape[1]
+
+    x_old = np.linspace(0, 1, len(points))
+    x_new = np.linspace(0, 1, target_len)
+
+    out = np.zeros((target_len, n_dims))
+    for d in range(n_dims):
+        out[:, d] = np.interp(x_new, x_old, points[:, d])
+
+    return out
+model = nn.Sequential(
+    nn.Linear(50, 50),
+    nn.ReLU(),
+    nn.Linear(50, 1)
+)
+
+model.load_state_dict(torch.load(BASE_DIR / "crouch_model.pth"))
+model.eval()
 def rep_summary(rep):
-    angles = [p["angle"] for p in rep]
+    global model
+    angles = [p["angle"] for p in rep]  
     times = [p["timestamp"] for p in rep]
 
+    points = to_fixed_length_nd(angles, target_len=50)
+    points_norm = (points - np.min(points)) / \
+                       (np.max(points) - np.min(points))
+    rep_quality = model(torch.tensor(points_norm, dtype=torch.float32).unsqueeze(0)).item()
     min_angle = min(angles)
     max_angle = max(angles)
     duration = (times[-1] - times[0]) / 1000.0  # seconds
@@ -104,7 +137,8 @@ def rep_summary(rep):
         "max_angle": max_angle,
         "duration": duration,
         "range_of_motion": range_of_motion,
-        "num_frames": len(rep)
+        "num_frames": len(rep),
+        "quality_score": rep_quality,
     }
 
 reps = []
