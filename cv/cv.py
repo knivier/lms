@@ -1094,6 +1094,12 @@ class PoseCore:
                 if dh is not None:
                     try:
                         ts_ms = now_ms - self.session_start_ms
+                        # Throttled print so user sees session is active (~once per second)
+                        if not hasattr(self, "_last_dh_print_ms"):
+                            self._last_dh_print_ms = 0
+                        if now_ms - self._last_dh_print_ms >= 1000:
+                            self._last_dh_print_ms = now_ms
+                            print("[CV] Datahandler: session ON, feeding pose", file=sys.stderr, flush=True)
                         dh.run_workout(angles, ts_ms)
                     except Exception:
                         pass

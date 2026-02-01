@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 import numpy as np
 from scipy.signal import find_peaks
@@ -106,17 +107,39 @@ def to_fixed_length(points, target_len=50):
 
     return np.interp(x_new, x_old, points)
 
+def _workout_id_path():
+    return Path(__file__).resolve().parent.parent / "workout_id.json"
+
+def _read_workout_state():
+    """Read workout_id.json (JSONL: one line). Returns dict with workout_id, session."""
+    p = _workout_id_path()
+    if not p.exists():
+        return {"workout_id": "pushups", "session": "off"}
+    try:
+        with open(p, "r") as f:
+            line = f.readline()
+            if not line.strip():
+                return {"workout_id": "pushups", "session": "off"}
+            return json.loads(line)
+    except (json.JSONDecodeError, OSError):
+        return {"workout_id": "pushups", "session": "off"}
+
+def session_is_on():
+    """True if workout_id.json has session == 'on'."""
+    return _read_workout_state().get("session", "off").lower() == "on"
+
 def workout_init():
     global detector
-    with open("../workout_id.json", "r") as f:
-        data = json.load(f)
-        workout_type = data.get("workout_id", "pushups")
-        detector = SimpleRepDetector(
-            min_threshold=WORKOUT_TO_PARAMETERS[workout_type]["min_threshold"],
-            max_threshold=WORKOUT_TO_PARAMETERS[workout_type]["max_threshold"],
-            joints=WORKOUT_TO_PARAMETERS[workout_type]["joints"]
-        )
-        
+    data = _read_workout_state()
+    workout_type = data.get("workout_id", "pushups") or "pushups"
+    params = WORKOUT_TO_PARAMETERS.get(workout_type, WORKOUT_TO_PARAMETERS["pushups"])
+    detector = SimpleRepDetector(
+        min_threshold=params["min_threshold"],
+        max_threshold=params["max_threshold"],
+        joints=params["joints"],
+    )
+    print(f"[Datahandler] Session ON, workout={workout_type!r}, rep detection active", file=sys.stderr, flush=True)
+
 detector = None
 _last_workout_id = None
 
@@ -129,10 +152,9 @@ def run_workout(joint_angles, timestamp):
         workout_init()
     rep = detector.feed(joint_angles, timestamp)
     if rep is not None:
-        print(rep)
         reps.append(rep)
         summary = rep_summary(rep)
-        
+        print(f"[Datahandler] Rep detected: {summary}", file=sys.stderr, flush=True)
         return summary
     return None
 readLines = 0
@@ -145,7 +167,7 @@ def store_reps():
             if readingLine > readLines:
                 summary = run_workout(json.loads(line).get("angles", {}), json.loads(line).get("timestamp_utc", 0))
                 if summary is not None:
-                    print(f"Rep detected: {summary}")
+                    print(f"Rep detected: {summary}", file=sys.stderr, flush=True)
                 readLines += 1
             
     with open("reps_summary.json", "w") as f:
