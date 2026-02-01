@@ -3,8 +3,10 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.interpolate import UnivariateSpline
 from matplotlib import pyplot as plt
+import torch
+import torch.nn as nn
 
-JSONL_FILE = "./lms/training-data/crouch/horridcrouch.jsonl"
+JSONL_FILE = "./lms/training-data/crouch/pose_log.jsonl"
 OUTPUT_FILE = "./dataset.jsonl"  # where we append all reps
 
 # ---------------------------
@@ -41,8 +43,8 @@ time = (time - time[0]) / 1000.0  # convert to seconds
 # Detect all reps
 # ---------------------------
 inverted = -signal
-peaks, _ = find_peaks(inverted, distance=7)
-peaks = peaks[signal[peaks] < 130]
+peaks, _ = find_peaks(inverted, distance=5)
+peaks = peaks[signal[peaks] < 140]
 plt.plot(time, signal)
 plt.plot(time[peaks], signal[peaks], "x")
 plt.show()
@@ -54,6 +56,15 @@ if len(peaks) < 2:
 # ---------------------------
 fixed_length = 50
 dataset = []
+
+model = nn.Sequential(
+    nn.Linear(50, 50),
+    nn.ReLU(),
+    nn.Linear(50, 1)
+)
+
+model.load_state_dict(torch.load("crouch_model.pth"))
+model.eval()
 
 for i in range(len(peaks)-1):
     start, end = peaks[i], peaks[i+1]
@@ -78,6 +89,7 @@ for i in range(len(peaks)-1):
     plt.legend()
     plt.show()
     # Ask user for label
+    print("Predicted Score: " + str(model(torch.tensor(spline_vals_norm, dtype=torch.float32).unsqueeze(0)).item()))
     print(f"Rep {i+1}/{len(peaks)-1}:")
     print("Normalized spline vector preview:", spline_vals_norm[:5], "...")  # first 5 values
     label = input("Enter label/output for this rep (e.g., 0 or 1): ")
