@@ -44,7 +44,11 @@ def main():
                 break
             _, jpeg = cv2.imencode(".jpg", combined)
             b64 = base64.standard_b64encode(jpeg.tobytes()).decode("ascii")
-            print(b64, flush=True)
+            try:
+                print(b64, flush=True)
+            except BrokenPipeError:
+                # Reader (e.g. Tauri app) closed the pipe; exit cleanly.
+                break
     finally:
         core.close()
 
